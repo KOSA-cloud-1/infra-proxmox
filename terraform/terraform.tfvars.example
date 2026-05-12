@@ -1,0 +1,115 @@
+# =========================================================
+# Proxmox API 접속 정보
+# =========================================================
+
+virtual_environment_endpoint  = "https://YOUR_PROXMOX_IP:8006/"
+virtual_environment_api_token = "YOUR_API_TOKEN"
+
+# =========================================================
+# Template 정보
+# =========================================================
+
+template_vm_id = "YOUR_TEMPLATE_VM_ID"
+template_name  = "YOUR_TEMPLATE_NAME"
+
+# =========================================================
+# VM 기본 계정 정보
+# =========================================================
+
+vm_user     = "YOUR_USERNAME"
+vm_password = "YOUR_PASSWORD"
+
+# =========================================================
+# SSH 공개키
+# =========================================================
+
+ssh_public_key = "YOUR_SSH_PUBLIC_KEY"
+
+# =========================================================
+# Kubernetes Cluster VM 구성
+# =========================================================
+
+virtual_machines = {
+
+  # =======================================================
+  # Control Plane Nodes
+  # Control Plane Nodes 의 cpu core, memory 설계필요
+  # =======================================================
+
+  cp1 = {
+    id     = "YOUR_VM_ID"
+    node   = "YOUR_NODE_NAME"
+    ip     = "YOUR_VM_IP"
+    cpu    = 2
+    memory = 4096
+  }
+
+  cp2 = {
+    id     = "YOUR_VM_ID"
+    node   = "YOUR_NODE_NAME"
+    ip     = "YOUR_VM_IP"
+    cpu    = 4
+    memory = 4096
+  }
+
+  cp3 = {
+    id     = "YOUR_VM_ID"
+    node   = "YOUR_NODE_NAME"
+    ip     = "YOUR_VM_IP"
+    cpu    = 2
+    memory = 4096
+  }
+
+  # =======================================================
+  # Worker Nodes
+  # Worker Nodes 의 cpu core, memory 설계필요
+  # =======================================================
+
+  worker1 = {
+    id     = "YOUR_VM_ID"
+    node   = "YOUR_NODE_NAME"
+    ip     = "YOUR_VM_IP"
+    cpu    = 4
+    memory = 2048
+  }
+
+  worker2 = {
+    id     = "YOUR_VM_ID"
+    node   = "YOUR_NODE_NAME"
+    ip     = "YOUR_VM_IP"
+    cpu    = 4
+    memory = 2048
+  }
+
+  worker3 = {
+    id     = "YOUR_VM_ID"
+    node   = "YOUR_NODE_NAME"
+    ip     = "YOUR_VM_IP"
+    cpu    = 4
+    memory = 2048
+  }
+
+  worker4 = {
+    id     = "YOUR_VM_ID"
+    node   = "YOUR_NODE_NAME"
+    ip     = "YOUR_VM_IP"
+    cpu    = 4
+    memory = 2048
+  }
+
+  worker5 = {
+    id     = "YOUR_VM_ID"
+    node   = "YOUR_NODE_NAME"
+    ip     = "YOUR_VM_IP"
+    cpu    = 4
+    memory = 2048
+  }
+
+  worker6 = {
+    id     = "YOUR_VM_ID"
+    node   = "YOUR_NODE_NAME"
+    ip     = "YOUR_VM_IP"
+    cpu    = 4
+    memory = 2048
+  }
+}
