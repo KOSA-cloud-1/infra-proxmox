@@ -78,7 +78,7 @@ resource "proxmox_virtual_environment_vm" "k8s" {
     # -------------------------------------------------------
     # Cloud-Init User Data
     # -------------------------------------------------------
-    user_data_file_id = "local:snippets/init.yml"
+    user_data_file_id = "local:snippets/init-${each.key}.yml"
   }
 
   # =========================================================
