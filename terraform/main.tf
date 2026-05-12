@@ -99,10 +99,14 @@ resource "proxmox_virtual_environment_vm" "k8s" {
   # 디스크 설정
   # =========================================================
   disk {
-    datastore_id = "local-lvm"
+    datastore_id = "ceph-rbd"
     interface    = "scsi0"
     size         = 20
-    file_format  = "raw"
+
+    # Ceph + Kubernetes면 권장
+    discard      = "on"
+    iothread     = true
+    ssd          = true
   }
 
   # =========================================================
