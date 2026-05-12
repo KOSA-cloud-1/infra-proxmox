@@ -1,0 +1,32 @@
+- name: Initialize cp1 hostname
+  hosts: cp1
+  become: true
+
+  tasks:
+
+    # =====================================================
+    # hostname 설정
+    # =====================================================
+    - name: Set hostname
+      hostname:
+        name: cp1
+
+    # =====================================================
+    # /etc/hosts 수정
+    # =====================================================
+    - name: Update /etc/hosts
+      lineinfile:
+        path: /etc/hosts
+        regexp: '^127\.0\.1\.1'
+        line: '127.0.1.1 cp1'
+
+    # =====================================================
+    # hostname 확인
+    # =====================================================
+    - name: Check hostname
+      shell: hostname
+      register: hostname_result
+
+    - name: Print hostname
+      debug:
+        msg: "{{ hostname_result.stdout }}"

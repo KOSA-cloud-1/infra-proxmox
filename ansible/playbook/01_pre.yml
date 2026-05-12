@@ -1,0 +1,44 @@
+- name: VM precheck
+  hosts: k8s
+  become: true
+
+  tasks:
+    - name: Stop apt background services
+      systemd:
+        name: "{{ item }}"
+        state: stopped
+        enabled: false
+        masked: true
+      loop:
+        - unattended-upgrades
+        - apt-daily.timer
+        - apt-daily-upgrade.timer
+        - apt-daily.service
+        - apt-daily-upgrade.service
+
+    - name: Kill apt processes
+      shell: |
+        killall apt apt-get unattended-upgr || true
+
+    - name: Remove apt locks
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /var/lib/dpkg/lock-frontend
+        - /var/lib/dpkg/lock
+        - /var/cache/apt/archives/lock
+
+
+    - name: Fix dpkg state
+      shell: |
+        dpkg --configure -a || true
+        apt-get -f install -y || true
+
+    - name: Safe apt update
+      apt:
+        update_cache: yes
+      register: apt_result
+      retries: 10
+      delay: 10
+      until: apt_result is succeeded

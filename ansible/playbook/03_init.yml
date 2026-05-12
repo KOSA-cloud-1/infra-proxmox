@@ -1,0 +1,114 @@
+- name: Initialize Kubernetes Cluster
+  hosts: cp1
+  become: true
+  become_user: root
+
+  tasks:
+
+    # =====================================================
+    # 1. Kubernetes 초기화
+    # =====================================================
+    - name: Initialize cluster
+      shell: |
+        kubeadm init \
+        --control-plane-endpoint "10.10.10.50:6443" \
+        --upload-certs \
+        --pod-network-cidr=172.20.0.0/16
+      args:
+        creates: /etc/kubernetes/admin.conf
+
+    # =====================================================
+    # 2. kubeconfig 설정 (kosa)
+    # =====================================================
+    - name: Setup kubeconfig directory
+      file:
+        path: /home/kosa/.kube
+        state: directory
+        owner: kosa
+        group: kosa
+
+    - name: Copy admin.conf
+      copy:
+        src: /etc/kubernetes/admin.conf
+        dest: /home/kosa/.kube/config
+        remote_src: yes
+        owner: kosa
+        group: kosa
+
+    # =====================================================
+    # 3. API Server Ready 대기 (중요 수정)
+    # =====================================================
+    - name: Wait for Kubernetes API Server
+      become: true
+      become_user: kosa
+      shell: kubectl get nodes
+      register: k8s_ready
+      retries: 30
+      delay: 10
+      until: k8s_ready.rc == 0
+      environment:
+        KUBECONFIG: "/home/kosa/.kube/config"
+
+    # =====================================================
+    # 4. Calico 설치 (READY 이후로 이동)
+    # =====================================================
+    - name: Install Calico
+      shell: |
+        kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.28.2/manifests/calico.yaml
+      environment:
+        KUBECONFIG: "/home/kosa/.kube/config"
+
+    # =====================================================
+    # 3. worker join command 생성
+    # =====================================================
+    - name: Get worker join command
+      shell: kubeadm token create --print-join-command
+      register: worker_join
+
+    # =====================================================
+    # 4. certificate key 생성
+    # =====================================================
+    - name: Get certificate key
+      shell: kubeadm init phase upload-certs --upload-certs
+      register: cert_key_raw
+
+    - name: Extract cert key
+      set_fact:
+        cert_key: "{{ cert_key_raw.stdout_lines[-1] }}"
+
+    # =====================================================
+    # 5. control-plane join command 생성
+    # =====================================================
+    - name: Build control-plane join command
+      set_fact:
+        control_plane_join_cmd: "{{ worker_join.stdout }} --control-plane --certificate-key {{ cert_key }}"
+        cacheable: true
+
+- name: Join cp2/cp3
+  hosts: cp2,cp3
+  become: true
+
+  tasks:
+
+    - name: Debug join cp
+      debug:
+        msg: "{{ hostvars['cp1']['control_plane_join_cmd'] }}"
+
+    - name: Join control plane
+      shell: "{{ hostvars['cp1']['control_plane_join_cmd'] }}"
+
+
+- name: Join worker nodes
+  hosts: workers
+  become: true
+  become_user: root
+
+  tasks:
+
+
+    - name: Debug Join worker
+      debug:
+        msg: "{{ hostvars['cp1']['control_plane_join_cmd'] }}"
+
+    - name: Join worker
+      shell: "{{ hostvars['cp1']['worker_join'].stdout }}"

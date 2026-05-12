@@ -1,0 +1,46 @@
+# =========================================================
+# Fetch kubeconfig from cp1
+# =========================================================
+- name: Fetch kubeconfig from cp1
+  hosts: cp1
+  become: true
+
+  tasks:
+
+    - name: Fetch admin.conf
+      fetch:
+        src: /etc/kubernetes/admin.conf
+        dest: ./files/admin.conf
+        flat: yes
+
+
+# =========================================================
+# Distribute kubeconfig to workers
+# =========================================================
+- name: Distribute kubeconfig to workers
+  hosts: workers
+  become: true
+
+  tasks:
+
+    # =====================================================
+    # 1. .kube 디렉토리 생성 (root가 아닌 kosa 기준)
+    # =====================================================
+    - name: Create kube directory
+      file:
+        path: /home/kosa/.kube
+        state: directory
+        owner: kosa
+        group: kosa
+        mode: '0755'
+
+    # =====================================================
+    # 2. kubeconfig 복사
+    # =====================================================
+    - name: Copy kubeconfig
+      copy:
+        src: ./files/admin.conf
+        dest: /home/kosa/.kube/config
+        owner: kosa
+        group: kosa
+        mode: '0644'

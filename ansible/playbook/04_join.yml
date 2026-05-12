@@ -1,0 +1,51 @@
+# =========================================================
+# CP2, CP3 - Control Plane Join
+# =========================================================
+- name: Join additional control planes
+  hosts: cp2,cp3
+  become: true
+
+  tasks:
+
+    # # =====================================================
+    # # 1. control-plane join 실행
+    # # =====================================================
+    # - name: Join control plane
+    #   shell: "{{ hostvars['cp1']['control_plane_join_cmd'] }}"
+
+    # =====================================================
+    # 2. kubeconfig 디렉토리 생성
+    # =====================================================
+    - name: Setup kubeconfig directory
+      file:
+        path: /home/kosa/.kube
+        state: directory
+        owner: kosa
+        group: kosa
+
+    # =====================================================
+    # 3. kubeconfig 복사
+    # =====================================================
+    - name: Copy kubeconfig
+      copy:
+        src: /etc/kubernetes/admin.conf
+        dest: /home/kosa/.kube/config
+        remote_src: yes
+        owner: kosa
+        group: kosa
+
+
+# =========================================================
+# Worker Nodes Join
+# # =========================================================
+# - name: Join worker nodes
+#   hosts: workers
+#   become: true
+
+#   tasks:
+
+#     # =====================================================
+#     # 1. worker join 실행
+#     # =====================================================
+#     - name: Join worker
+#       shell: "{{ hostvars['cp1']['worker_join'].stdout }}"
