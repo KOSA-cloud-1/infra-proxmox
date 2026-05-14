@@ -1,15 +1,15 @@
 [control_plane]
-cp1 ansible_host=
-cp2 ansible_host=
-cp3 ansible_host=
+cp1 ansible_host= node_ip=
+cp2 ansible_host= node_ip=
+cp3 ansible_host= node_ip=
 
 [workers]
-worker1 ansible_host=
-worker2 ansible_host=
-worker3 ansible_host=
-worker4 ansible_host=
-worker5 ansible_host=
-worker6 ansible_host=
+worker1 ansible_host= node_ip=
+worker2 ansible_host= node_ip=
+worker3 ansible_host= node_ip=
+worker4 ansible_host= node_ip=
+worker5 ansible_host= node_ip=
+worker6 ansible_host= node_ip=
 
 [k8s:children]
 control_plane
@@ -18,3 +18,7 @@ workers
 [k8s:vars]
 ansible_user=user
 ansible_ssh_private_key_file=~/.ssh/id_rsa
+ansible_python_interpreter=/usr/bin/python3.10
+
+[kube_vip:children]
+control_plane

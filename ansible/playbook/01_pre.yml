@@ -7,37 +7,26 @@
       systemd:
         name: "{{ item }}"
         state: stopped
-        enabled: false
-        masked: true
       loop:
         - unattended-upgrades
         - apt-daily.timer
         - apt-daily-upgrade.timer
         - apt-daily.service
         - apt-daily-upgrade.service
+      ignore_errors: true
 
-    - name: Kill apt processes
-      shell: |
-        killall apt apt-get unattended-upgr || true
-
-    - name: Remove apt locks
-      file:
-        path: "{{ item }}"
-        state: absent
-      loop:
-        - /var/lib/dpkg/lock-frontend
-        - /var/lib/dpkg/lock
-        - /var/cache/apt/archives/lock
-
-
-    - name: Fix dpkg state
-      shell: |
-        dpkg --configure -a || true
-        apt-get -f install -y || true
+    - name: Fix interrupted dpkg state
+      command: dpkg --configure -a
+      register: dpkg_result
+      retries: 5
+      delay: 10
+      until: dpkg_result.rc == 0
+      changed_when: false
 
     - name: Safe apt update
       apt:
         update_cache: yes
+        lock_timeout: 300
       register: apt_result
       retries: 10
       delay: 10

@@ -4,14 +4,19 @@
 - name: Join additional control planes
   hosts: cp2,cp3
   become: true
+  serial: 1
 
   tasks:
 
-    # # =====================================================
-    # # 1. control-plane join 실행
-    # # =====================================================
-    # - name: Join control plane
-    #   shell: "{{ hostvars['cp1']['control_plane_join_cmd'] }}"
+    - name: Join control plane
+      shell: >
+        {{ hostvars['cp1']['worker_join_cmd'] }}
+        --control-plane
+        --apiserver-advertise-address {{ node_ip | default(ansible_host) }}
+        --certificate-key {{ hostvars['cp1']['cert_key'] }}
+      args:
+        creates: /etc/kubernetes/admin.conf
+      no_log: true
 
     # =====================================================
     # 2. kubeconfig 디렉토리 생성
@@ -22,6 +27,7 @@
         state: directory
         owner: kosa
         group: kosa
+        mode: '0700'
 
     # =====================================================
     # 3. kubeconfig 복사
@@ -33,19 +39,184 @@
         remote_src: yes
         owner: kosa
         group: kosa
+        mode: '0600'
 
 
 # =========================================================
 # Worker Nodes Join
-# # =========================================================
-# - name: Join worker nodes
-#   hosts: workers
-#   become: true
+# =========================================================
+- name: Join worker nodes
+  hosts: workers
+  become: true
+  become_user: root
 
-#   tasks:
+  tasks:
 
-#     # =====================================================
-#     # 1. worker join 실행
-#     # =====================================================
-#     - name: Join worker
-#       shell: "{{ hostvars['cp1']['worker_join'].stdout }}"
+    - name: Check worker kubelet config
+      stat:
+        path: /etc/kubernetes/kubelet.conf
+      register: worker_kubelet_conf
+
+    - name: Join worker
+      shell: "{{ hostvars['cp1']['worker_join_cmd'] }}"
+      args:
+        creates: /etc/kubernetes/kubelet.conf
+      failed_when: false
+      no_log: true
+      when: not worker_kubelet_conf.stat.exists
+
+    - name: Check worker kubelet config after join
+      stat:
+        path: /etc/kubernetes/kubelet.conf
+      register: worker_kubelet_conf_after
+
+    - name: Fail when worker join did not create kubelet config
+      fail:
+        msg: Worker join failed and /etc/kubernetes/kubelet.conf was not created.
+      when: not worker_kubelet_conf_after.stat.exists
+
+    - name: Wait for worker node registration
+      command: >
+        kubectl --kubeconfig=/etc/kubernetes/admin.conf
+        --server=https://{{ hostvars['cp1'].node_ip | default(hostvars['cp1'].ansible_host) }}:6443
+        --request-timeout=10s
+        get node {{ inventory_hostname }}
+      delegate_to: cp1
+      register: worker_node_check
+      changed_when: false
+      retries: 30
+      delay: 5
+      until: worker_node_check.rc == 0
+
+
+# =========================================================
+# Worker read-only kubeconfig
+# =========================================================
+- name: Create worker read-only kubeconfig
+  hosts: cp1
+  become: true
+  become_user: root
+
+  tasks:
+
+    - name: Apply worker read-only RBAC
+      shell: |
+        kubectl --kubeconfig=/etc/kubernetes/admin.conf --server=https://{{ node_ip | default(ansible_host) }}:6443 --request-timeout=10s apply -f - <<'EOF'
+        apiVersion: v1
+        kind: ServiceAccount
+        metadata:
+          name: worker-readonly
+          namespace: kube-system
+        ---
+        apiVersion: rbac.authorization.k8s.io/v1
+        kind: ClusterRole
+        metadata:
+          name: worker-readonly
+        rules:
+          - apiGroups: [""]
+            resources: ["configmaps", "endpoints", "events", "namespaces", "nodes", "pods", "pods/log", "services"]
+            verbs: ["get", "list", "watch"]
+          - apiGroups: ["apps"]
+            resources: ["daemonsets", "deployments", "replicasets", "statefulsets"]
+            verbs: ["get", "list", "watch"]
+          - apiGroups: ["batch"]
+            resources: ["cronjobs", "jobs"]
+            verbs: ["get", "list", "watch"]
+        ---
+        apiVersion: rbac.authorization.k8s.io/v1
+        kind: ClusterRoleBinding
+        metadata:
+          name: worker-readonly
+        subjects:
+          - kind: ServiceAccount
+            name: worker-readonly
+            namespace: kube-system
+        roleRef:
+          kind: ClusterRole
+          name: worker-readonly
+          apiGroup: rbac.authorization.k8s.io
+        ---
+        apiVersion: v1
+        kind: Secret
+        metadata:
+          name: worker-readonly-token
+          namespace: kube-system
+          annotations:
+            kubernetes.io/service-account.name: worker-readonly
+        type: kubernetes.io/service-account-token
+        EOF
+
+    - name: Wait for worker read-only token
+      command: >
+        kubectl --kubeconfig=/etc/kubernetes/admin.conf
+        --server=https://{{ node_ip | default(ansible_host) }}:6443
+        --request-timeout=10s
+        -n kube-system get secret worker-readonly-token -o jsonpath={.data.token}
+      register: worker_readonly_token
+      changed_when: false
+      retries: 30
+      delay: 2
+      until: worker_readonly_token.stdout | length > 0
+      no_log: true
+
+    - name: Read cluster CA
+      slurp:
+        src: /etc/kubernetes/pki/ca.crt
+      register: worker_readonly_ca
+      no_log: true
+
+    - name: Build worker read-only kubeconfig
+      set_fact:
+        worker_readonly_kubeconfig: |
+          apiVersion: v1
+          kind: Config
+          clusters:
+            - name: kubernetes
+              cluster:
+                certificate-authority-data: {{ worker_readonly_ca.content }}
+                server: https://{{ vip_address }}:6443
+          users:
+            - name: worker-readonly
+              user:
+                token: {{ worker_readonly_token.stdout | b64decode }}
+          contexts:
+            - name: worker-readonly@kubernetes
+              context:
+                cluster: kubernetes
+                user: worker-readonly
+          current-context: worker-readonly@kubernetes
+      no_log: true
+
+
+- name: Install worker read-only kubeconfig
+  hosts: workers
+  become: true
+  become_user: root
+
+  tasks:
+
+    - name: Setup worker kubeconfig directory
+      file:
+        path: /home/kosa/.kube
+        state: directory
+        owner: kosa
+        group: kosa
+        mode: '0700'
+
+    - name: Install worker read-only kubeconfig
+      copy:
+        content: "{{ hostvars['cp1']['worker_readonly_kubeconfig'] }}"
+        dest: /home/kosa/.kube/config
+        owner: kosa
+        group: kosa
+        mode: '0600'
+      no_log: true
+
+    - name: Verify worker read-only kubeconfig
+      become_user: kosa
+      command: kubectl --kubeconfig=/home/kosa/.kube/config get node {{ inventory_hostname }}
+      register: worker_readonly_check
+      changed_when: false
+      retries: 30
+      delay: 5
+      until: worker_readonly_check.rc == 0
