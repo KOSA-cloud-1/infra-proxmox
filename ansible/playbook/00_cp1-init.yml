@@ -1,5 +1,5 @@
-- name: Initialize cp1 hostname
-  hosts: cp1
+- name: Initialize node hostnames
+  hosts: k8s
   become: true
 
   tasks:
@@ -9,7 +9,7 @@
     # =====================================================
     - name: Set hostname
       hostname:
-        name: cp1
+        name: "{{ inventory_hostname }}"
 
     # =====================================================
     # /etc/hosts 수정
@@ -18,7 +18,7 @@
       lineinfile:
         path: /etc/hosts
         regexp: '^127\.0\.1\.1'
-        line: '127.0.1.1 cp1'
+        line: "127.0.1.1 {{ inventory_hostname }}"
 
     # =====================================================
     # hostname 확인

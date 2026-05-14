@@ -1,17 +1,17 @@
 # =========================================================
-# Fetch kubeconfig from cp1
+# Read kubeconfig from cp1
 # =========================================================
-- name: Fetch kubeconfig from cp1
+- name: Read kubeconfig from cp1
   hosts: cp1
   become: true
 
   tasks:
 
-    - name: Fetch admin.conf
-      fetch:
+    - name: Read admin.conf
+      slurp:
         src: /etc/kubernetes/admin.conf
-        dest: ./files/admin.conf
-        flat: yes
+      register: admin_conf
+      no_log: true
 
 
 # =========================================================
@@ -39,8 +39,9 @@
     # =====================================================
     - name: Copy kubeconfig
       copy:
-        src: ./files/admin.conf
+        content: "{{ hostvars['cp1']['admin_conf']['content'] | b64decode }}"
         dest: /home/kosa/.kube/config
         owner: kosa
         group: kosa
         mode: '0644'
+      no_log: true

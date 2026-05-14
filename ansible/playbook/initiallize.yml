@@ -1,0 +1,122 @@
+# =========================================================
+# STEP 1 - CLEAN CLUSTER STATE FROM cp1 (ETCD OWNER)
+# =========================================================
+- name: STEP 1 - Remove nodes from cluster (cp1 only)
+  hosts: cp1
+  become: true
+
+  tasks:
+
+    # =====================================================
+    # collect node list (optional safety)
+    # =====================================================
+    - name: get all nodes except cp1
+      shell: |
+        kubectl --kubeconfig=/etc/kubernetes/admin.conf get nodes -o name | cut -d'/' -f2 | grep -v cp1
+      register: node_list
+      ignore_errors: yes
+
+    - name: delete nodes from cluster
+      shell: |
+        kubectl --kubeconfig=/etc/kubernetes/admin.conf delete node {{ item }} --ignore-not-found
+      loop: "{{ node_list.stdout_lines | default([]) }}"
+      ignore_errors: yes
+
+    # =====================================================
+    # remove kube-vip (optional)
+    # =====================================================
+    - name: remove kube-vip manifest
+      file:
+        path: /etc/kubernetes/manifests/kube-vip.yaml
+        state: absent
+      ignore_errors: yes
+
+
+# =========================================================
+# STEP 2 - RESET ALL NODES (cp + workers)
+# =========================================================
+- name: STEP 2 - Reset ALL nodes (cp + workers)
+  hosts: control_plane:workers
+  become: true
+
+  tasks:
+
+    # =====================================================
+    # stop kubelet
+    # =====================================================
+    - name: stop kubelet
+      service:
+        name: kubelet
+        state: stopped
+        enabled: no
+      ignore_errors: yes
+
+    # =====================================================
+    # kubeadm reset
+    # =====================================================
+    - name: kubeadm reset
+      command: timeout 60s kubeadm reset -f
+      ignore_errors: yes
+
+    - name: stop container runtime after reset
+      service:
+        name: "{{ item }}"
+        state: stopped
+      loop:
+        - kubelet
+        - containerd
+      ignore_errors: yes
+
+    - name: unmount kubelet pod mounts
+      shell: |
+        grep /var/lib/kubelet /proc/self/mountinfo | awk '{print $5}' | sort -r | xargs -r umount -lf
+      ignore_errors: yes
+
+    # =====================================================
+    # remove kubernetes directories
+    # =====================================================
+    - name: remove k8s dirs
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/kubernetes
+        - /var/lib/kubelet
+        - /var/lib/etcd
+        - /etc/cni/net.d
+        - /opt/cni
+        - /var/lib/cni
+        - /root/.kube
+        - /home/kosa/.kube
+      ignore_errors: yes
+
+    # =====================================================
+    # remove CNI interfaces
+    # =====================================================
+    - name: delete network interfaces
+      shell: |
+        ip link delete cni0 || true
+        ip link delete flannel.1 || true
+        ip link delete cali0 || true
+        ip link delete tunl0 || true
+      ignore_errors: yes
+
+    # =====================================================
+    # flush iptables
+    # =====================================================
+    - name: flush iptables
+      shell: |
+        iptables -F
+        iptables -t nat -F
+        iptables -t mangle -F
+        iptables -X
+      ignore_errors: yes
+
+    # =====================================================
+    # cleanup containerd state
+    # =====================================================
+    - name: cleanup containerd state
+      file:
+        path: /var/lib/containerd
+        state: absent
+      ignore_errors: yes

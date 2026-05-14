@@ -1,3 +1,30 @@
+- name: Install kube-vip manifest
+  hosts: kube_vip
+  become: true
+
+  tasks:
+
+    - name: Create manifests dir
+      file:
+        path: /etc/kubernetes/manifests
+        state: directory
+
+    - name: Pull kube-vip image
+      shell: |
+        crictl pull ghcr.io/kube-vip/kube-vip:v0.8.0
+
+    - name: Generate kube-vip manifest
+      shell: |
+        ctr -n k8s.io run --rm --net-host ghcr.io/kube-vip/kube-vip:v0.8.0 vip /kube-vip manifest pod \
+          --interface {{ vip_interface }} \
+          --address {{ vip_address }} \
+          --vipSubnet {{ vip_cidr }} \
+          --controlplane \
+          --arp \
+          --leaderElection \
+        > /etc/kubernetes/manifests/kube-vip.yaml
+
+
 - name: Initialize Kubernetes Cluster
   hosts: cp1
   become: true
@@ -8,12 +35,19 @@
     # =====================================================
     # 1. Kubernetes 초기화
     # =====================================================
+    - name: Add bootstrap VIP for kubeadm init
+      shell: |
+        ip addr show dev {{ vip_interface }} | grep -q "{{ vip_address }}/{{ vip_cidr }}" || \
+          ip addr add {{ vip_address }}/{{ vip_cidr }} dev {{ vip_interface }}
+
     - name: Initialize cluster
       shell: |
         kubeadm init \
-        --control-plane-endpoint "10.10.10.50:6443" \
-        --upload-certs \
-        --pod-network-cidr=172.20.0.0/16
+          --control-plane-endpoint "{{ vip_address }}:6443" \
+          --apiserver-advertise-address "{{ node_ip }}" \
+          --apiserver-cert-extra-sans "{{ ([vip_address] + (groups['control_plane'] | map('extract', hostvars, 'node_ip') | list)) | unique | join(',') }}" \
+          --upload-certs \
+          --pod-network-cidr={{ pod_cidr }}
       args:
         creates: /etc/kubernetes/admin.conf
 
@@ -36,7 +70,7 @@
         group: kosa
 
     # =====================================================
-    # 3. API Server Ready 대기 (중요 수정)
+    # 3. API Server Ready 대기
     # =====================================================
     - name: Wait for Kubernetes API Server
       become: true
@@ -49,66 +83,71 @@
       environment:
         KUBECONFIG: "/home/kosa/.kube/config"
 
-    # =====================================================
-    # 4. Calico 설치 (READY 이후로 이동)
-    # =====================================================
-    - name: Install Calico
+    - name: Grant kube-vip admin kubeconfig lease access
       shell: |
-        kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.28.2/manifests/calico.yaml
+        kubectl --kubeconfig=/etc/kubernetes/super-admin.conf \
+          create clusterrolebinding kubernetes-admin-cluster-admin \
+          --clusterrole=cluster-admin \
+          --user=kubernetes-admin \
+          --dry-run=client -o yaml | \
+        kubectl --kubeconfig=/etc/kubernetes/super-admin.conf apply -f -
+
+    - name: Restart kube-vip after RBAC is ready
+      shell: |
+        crictl ps -a --name kube-vip -q | xargs -r crictl stop || true
+        crictl ps -a --name kube-vip -q | xargs -r crictl rm || true
+      ignore_errors: yes
+
+    - name: Remove bootstrap VIP after kube-vip takes over
+      shell: |
+        ip addr del {{ vip_address }}/{{ vip_cidr }} dev {{ vip_interface }} 2>/dev/null || true
+
+    - name: Wait for Kubernetes API through VIP
+      shell: kubectl --server=https://{{ vip_address }}:6443 get --raw=/readyz
+      register: vip_ready
+      retries: 30
+      delay: 5
+      until: vip_ready.rc == 0
+      changed_when: false
       environment:
         KUBECONFIG: "/home/kosa/.kube/config"
 
     # =====================================================
-    # 3. worker join command 생성
+    # 4. Calico 설치
+    # =====================================================
+    - name: Configure Calico Kubernetes API endpoint
+      shell: |
+        kubectl -n kube-system create configmap kubernetes-services-endpoint \
+          --from-literal=KUBERNETES_SERVICE_HOST={{ vip_address }} \
+          --from-literal=KUBERNETES_SERVICE_PORT=6443 \
+          --dry-run=client -o yaml | kubectl apply -f -
+      environment:
+        KUBECONFIG: "/home/kosa/.kube/config"
+
+    - name: Render Calico manifest
+      template:
+        src: ../files/calico.yaml
+        dest: /tmp/calico.yaml
+        mode: '0644'
+
+    - name: Install Calico
+      shell: |
+        kubectl apply -f /tmp/calico.yaml
+      environment:
+        KUBECONFIG: "/home/kosa/.kube/config"
+
+    # =====================================================
+    # 5. join command 생성
     # =====================================================
     - name: Get worker join command
       shell: kubeadm token create --print-join-command
       register: worker_join
 
-    # =====================================================
-    # 4. certificate key 생성
-    # =====================================================
     - name: Get certificate key
       shell: kubeadm init phase upload-certs --upload-certs
       register: cert_key_raw
 
-    - name: Extract cert key
+    - name: Set join facts
       set_fact:
+        worker_join_cmd: "{{ worker_join.stdout }}"
         cert_key: "{{ cert_key_raw.stdout_lines[-1] }}"
-
-    # =====================================================
-    # 5. control-plane join command 생성
-    # =====================================================
-    - name: Build control-plane join command
-      set_fact:
-        control_plane_join_cmd: "{{ worker_join.stdout }} --control-plane --certificate-key {{ cert_key }}"
-        cacheable: true
-
-- name: Join cp2/cp3
-  hosts: cp2,cp3
-  become: true
-
-  tasks:
-
-    - name: Debug join cp
-      debug:
-        msg: "{{ hostvars['cp1']['control_plane_join_cmd'] }}"
-
-    - name: Join control plane
-      shell: "{{ hostvars['cp1']['control_plane_join_cmd'] }}"
-
-
-- name: Join worker nodes
-  hosts: workers
-  become: true
-  become_user: root
-
-  tasks:
-
-
-    - name: Debug Join worker
-      debug:
-        msg: "{{ hostvars['cp1']['control_plane_join_cmd'] }}"
-
-    - name: Join worker
-      shell: "{{ hostvars['cp1']['worker_join'].stdout }}"

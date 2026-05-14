@@ -1,0 +1,6 @@
+vip_address: 172.17.128.30
+vip_interface: eth0
+vip_cidr: 22
+node_interface: eth0
+node_cidr: 172.17.128.0/22
+pod_cidr: 172.20.0.0/16
