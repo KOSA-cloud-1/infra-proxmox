@@ -12,7 +12,7 @@
       shell: >
         {{ hostvars['cp1']['worker_join_cmd'] }}
         --control-plane
-        --apiserver-advertise-address {{ node_ip }}
+        --apiserver-advertise-address {{ node_ip | default(ansible_host) }}
         --certificate-key {{ hostvars['cp1']['cert_key'] }}
       args:
         creates: /etc/kubernetes/admin.conf

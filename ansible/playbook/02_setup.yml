@@ -47,7 +47,7 @@
       command: sysctl --system
 
     - name: Validate Kubernetes node network address
-      shell: ip -4 addr show dev {{ node_interface }} | grep -q "{{ node_ip }}/"
+      shell: ip -4 addr show dev {{ node_interface }} | grep -q "{{ node_ip | default(ansible_host) }}/"
       changed_when: false
 
     - name: Install containerd
@@ -123,7 +123,7 @@
         dest: /etc/default/kubelet
         mode: '0644'
         content: |
-          KUBELET_EXTRA_ARGS=--node-ip={{ node_ip }}
+          KUBELET_EXTRA_ARGS=--node-ip={{ node_ip | default(ansible_host) }}
       register: kubelet_default
 
     - name: Restart kubelet when node IP config changes

@@ -157,22 +157,23 @@ infra-proxmox/ansible/inventory.ini
 
 ```ini
 [control_plane]
-cp1 ansible_host=172.17.128.193 node_ip=172.17.128.193
-cp2 ansible_host=172.17.128.170 node_ip=172.17.128.170
-cp3 ansible_host=172.17.128.194 node_ip=172.17.128.194
+cp1 ansible_host=172.17.128.193
+cp2 ansible_host=172.17.128.170
+cp3 ansible_host=172.17.128.194
 
 [workers]
-worker1 ansible_host=172.17.128.171 node_ip=172.17.128.171
-worker2 ansible_host=172.17.128.189 node_ip=172.17.128.189
-worker3 ansible_host=172.17.128.176 node_ip=172.17.128.176
-worker4 ansible_host=172.17.128.172 node_ip=172.17.128.172
-worker5 ansible_host=172.17.128.175 node_ip=172.17.128.175
-worker6 ansible_host=172.17.128.190 node_ip=172.17.128.190
+worker1 ansible_host=172.17.128.171
+worker2 ansible_host=172.17.128.189
+worker3 ansible_host=172.17.128.176
+worker4 ansible_host=172.17.128.172
+worker5 ansible_host=172.17.128.175
+worker6 ansible_host=172.17.128.190
 ```
 
-`ansible_host`는 Ansible SSH 접속 주소입니다. `node_ip`는 Kubernetes가 노드 IP로 사용할 주소입니다.
+`ansible_host`는 Ansible SSH 접속 주소이며, 기본 Kubernetes node IP로도 사용합니다.
+SSH 접속 주소와 Kubernetes node IP가 다를 때만 해당 호스트에 `node_ip`를 추가합니다.
 
-현재는 관리망만 쓰므로 두 값을 같게 둡니다. DHCP로 VM IP가 바뀌면 두 값을 같이 수정해야 합니다.
+현재는 관리망만 쓰므로 `ansible_host`만 관리하면 됩니다. DHCP로 VM IP가 바뀌면 `ansible_host`를 수정합니다.
 
 inventory가 제대로 읽히는지 확인합니다.
 
@@ -181,7 +182,7 @@ ansible-inventory --host cp1
 ansible-inventory --host worker1
 ```
 
-출력에 `ansible_host`, `node_ip`, `vip_address`, `node_cidr`가 보여야 합니다.
+출력에 `ansible_host`, `vip_address`, `node_cidr`가 보여야 합니다.
 
 ## 4. SSH와 sudo 확인
 
@@ -203,7 +204,7 @@ ansible k8s -b -m command -a 'hostname'
 ansible k8s -b -m command -a 'ip -4 addr show dev eth0'
 ```
 
-여기서 각 노드의 `node_ip`가 보여야 합니다.
+여기서 각 노드의 `ansible_host` IP가 보여야 합니다.
 
 ## 5. 플레이북 문법 확인
 

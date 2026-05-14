@@ -40,12 +40,17 @@
         ip addr show dev {{ vip_interface }} | grep -q "{{ vip_address }}/{{ vip_cidr }}" || \
           ip addr add {{ vip_address }}/{{ vip_cidr }} dev {{ vip_interface }}
 
+    - name: Build API server certificate SANs
+      set_fact:
+        apiserver_cert_extra_sans: "{{ (apiserver_cert_extra_sans | default([vip_address])) + [hostvars[item].node_ip | default(hostvars[item].ansible_host)] }}"
+      loop: "{{ groups['control_plane'] }}"
+
     - name: Initialize cluster
       shell: |
         kubeadm init \
           --control-plane-endpoint "{{ vip_address }}:6443" \
-          --apiserver-advertise-address "{{ node_ip }}" \
-          --apiserver-cert-extra-sans "{{ ([vip_address] + (groups['control_plane'] | map('extract', hostvars, 'node_ip') | list)) | unique | join(',') }}" \
+          --apiserver-advertise-address "{{ node_ip | default(ansible_host) }}" \
+          --apiserver-cert-extra-sans "{{ apiserver_cert_extra_sans | unique | join(',') }}" \
           --upload-certs \
           --pod-network-cidr={{ pod_cidr }}
       args:
