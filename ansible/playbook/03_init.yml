@@ -22,6 +22,9 @@
           --controlplane \
           --arp \
           --leaderElection \
+          --leaseDuration 15 \
+          --leaseRenewDuration 10 \
+          --leaseRetry 2 \
         > /etc/kubernetes/manifests/kube-vip.yaml
 
 
@@ -80,7 +83,7 @@
     # 3. API Server Ready 대기
     # =====================================================
     - name: Wait for Kubernetes API Server
-      shell: kubectl --kubeconfig=/etc/kubernetes/super-admin.conf get --raw=/readyz
+      shell: kubectl --kubeconfig=/etc/kubernetes/super-admin.conf --server=https://{{ node_ip | default(ansible_host) }}:6443 --request-timeout=10s get --raw=/readyz
       register: k8s_ready
       retries: 30
       delay: 10
@@ -89,7 +92,7 @@
 
     - name: Grant kube-vip lease access
       shell: |
-        kubectl --kubeconfig=/etc/kubernetes/super-admin.conf apply -f - <<'EOF'
+        kubectl --kubeconfig=/etc/kubernetes/super-admin.conf --server=https://{{ node_ip | default(ansible_host) }}:6443 --request-timeout=10s apply -f - <<'EOF'
         apiVersion: rbac.authorization.k8s.io/v1
         kind: Role
         metadata:
@@ -125,7 +128,7 @@
         ip addr del {{ vip_address }}/{{ vip_cidr }} dev {{ vip_interface }} 2>/dev/null || true
 
     - name: Wait for Kubernetes API through VIP
-      shell: kubectl --kubeconfig=/etc/kubernetes/super-admin.conf --server=https://{{ vip_address }}:6443 get --raw=/readyz
+      shell: kubectl --kubeconfig=/etc/kubernetes/super-admin.conf --server=https://{{ vip_address }}:6443 --request-timeout=10s get --raw=/readyz
       register: vip_ready
       retries: 30
       delay: 5
@@ -135,14 +138,14 @@
     # =====================================================
     # 4. Calico 설치
     # =====================================================
-    - name: Configure Calico Kubernetes API endpoint
-      shell: |
-        kubectl -n kube-system create configmap kubernetes-services-endpoint \
-          --from-literal=KUBERNETES_SERVICE_HOST={{ vip_address }} \
-          --from-literal=KUBERNETES_SERVICE_PORT=6443 \
-          --dry-run=client -o yaml | kubectl apply -f -
-      environment:
-        KUBECONFIG: "/home/kosa/.kube/config"
+    - name: Remove Calico API endpoint override
+      command: >
+        kubectl --kubeconfig=/etc/kubernetes/admin.conf
+        --server=https://{{ node_ip | default(ansible_host) }}:6443
+        --request-timeout=10s
+        -n kube-system delete configmap kubernetes-services-endpoint --ignore-not-found=true
+      register: calico_endpoint_override
+      changed_when: "'deleted' in calico_endpoint_override.stdout"
 
     - name: Render Calico manifest
       template:
@@ -152,9 +155,27 @@
 
     - name: Install Calico
       shell: |
-        kubectl apply -f /tmp/calico.yaml
-      environment:
-        KUBECONFIG: "/home/kosa/.kube/config"
+        kubectl --kubeconfig=/etc/kubernetes/admin.conf --server=https://{{ node_ip | default(ansible_host) }}:6443 --request-timeout=10s apply -f /tmp/calico.yaml
+      register: calico_apply
+      retries: 5
+      delay: 10
+      until: calico_apply.rc == 0
+
+    - name: Restart Calico after API endpoint override changes
+      command: >
+        kubectl --kubeconfig=/etc/kubernetes/admin.conf
+        --server=https://{{ node_ip | default(ansible_host) }}:6443
+        --request-timeout=10s
+        -n kube-system rollout restart daemonset/calico-node
+      when: calico_endpoint_override.changed
+
+    - name: Wait for Calico daemonset
+      command: >
+        kubectl --kubeconfig=/etc/kubernetes/admin.conf
+        --server=https://{{ node_ip | default(ansible_host) }}:6443
+        --request-timeout=10s
+        -n kube-system rollout status daemonset/calico-node --timeout=10m
+      changed_when: false
 
     # =====================================================
     # 5. join command 생성
