@@ -35,7 +35,7 @@
 | `playbook.yml` | 전체 클러스터 구성 진입점 |
 | `playbook/initiallize.yml` | 기존 클러스터 상태 초기화 |
 
-`inventory.ini`는 로컬 환경 값과 SSH key 경로가 들어가므로 git에 포함하지 않습니다.
+`inventory.ini`는 로컬 환경 값과 SSH key 경로가 들어가므로 git에 포함하지 않습니다. `admin.conf` 같은 kubeconfig는 인증 정보가 들어가므로 worker 노드나 git 저장소에 배포하지 않습니다.
 
 ## 사전 조건
 
@@ -132,7 +132,6 @@ ansible-playbook playbook.yml
 3. kube-vip manifest 생성과 cp1 초기화
 4. kubeconfig 설정, kube-vip 권한 부여, Calico 설치
 5. 추가 control-plane과 worker join
-6. kubeconfig 후처리
 
 ## 완료 후 확인
 

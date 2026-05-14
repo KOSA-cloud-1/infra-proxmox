@@ -37,7 +37,7 @@
     # =====================================================
     - name: Add bootstrap VIP for kubeadm init
       shell: |
-        ip addr show dev {{ vip_interface }} | grep -q "{{ vip_address }}/{{ vip_cidr }}" || \
+        ip addr show dev {{ vip_interface }} | grep -Fq "{{ vip_address }}/{{ vip_cidr }}" || \
           ip addr add {{ vip_address }}/{{ vip_cidr }} dev {{ vip_interface }}
 
     - name: Build API server certificate SANs
@@ -65,6 +65,7 @@
         state: directory
         owner: kosa
         group: kosa
+        mode: '0700'
 
     - name: Copy admin.conf
       copy:
@@ -73,49 +74,63 @@
         remote_src: yes
         owner: kosa
         group: kosa
+        mode: '0600'
 
     # =====================================================
     # 3. API Server Ready 대기
     # =====================================================
     - name: Wait for Kubernetes API Server
-      become: true
-      become_user: kosa
-      shell: kubectl get nodes
+      shell: kubectl --kubeconfig=/etc/kubernetes/super-admin.conf get --raw=/readyz
       register: k8s_ready
       retries: 30
       delay: 10
       until: k8s_ready.rc == 0
-      environment:
-        KUBECONFIG: "/home/kosa/.kube/config"
+      changed_when: false
 
-    - name: Grant kube-vip admin kubeconfig lease access
+    - name: Grant kube-vip lease access
       shell: |
-        kubectl --kubeconfig=/etc/kubernetes/super-admin.conf \
-          create clusterrolebinding kubernetes-admin-cluster-admin \
-          --clusterrole=cluster-admin \
-          --user=kubernetes-admin \
-          --dry-run=client -o yaml | \
-        kubectl --kubeconfig=/etc/kubernetes/super-admin.conf apply -f -
+        kubectl --kubeconfig=/etc/kubernetes/super-admin.conf apply -f - <<'EOF'
+        apiVersion: rbac.authorization.k8s.io/v1
+        kind: Role
+        metadata:
+          name: kube-vip-lease-manager
+          namespace: kube-system
+        rules:
+          - apiGroups: ["coordination.k8s.io"]
+            resources: ["leases"]
+            verbs: ["get", "list", "watch", "create", "update", "patch"]
+        ---
+        apiVersion: rbac.authorization.k8s.io/v1
+        kind: RoleBinding
+        metadata:
+          name: kube-vip-lease-manager
+          namespace: kube-system
+        subjects:
+          - kind: User
+            name: kubernetes-admin
+            apiGroup: rbac.authorization.k8s.io
+        roleRef:
+          kind: Role
+          name: kube-vip-lease-manager
+          apiGroup: rbac.authorization.k8s.io
+        EOF
 
     - name: Restart kube-vip after RBAC is ready
       shell: |
         crictl ps -a --name kube-vip -q | xargs -r crictl stop || true
         crictl ps -a --name kube-vip -q | xargs -r crictl rm || true
-      ignore_errors: yes
 
     - name: Remove bootstrap VIP after kube-vip takes over
       shell: |
         ip addr del {{ vip_address }}/{{ vip_cidr }} dev {{ vip_interface }} 2>/dev/null || true
 
     - name: Wait for Kubernetes API through VIP
-      shell: kubectl --server=https://{{ vip_address }}:6443 get --raw=/readyz
+      shell: kubectl --kubeconfig=/etc/kubernetes/super-admin.conf --server=https://{{ vip_address }}:6443 get --raw=/readyz
       register: vip_ready
       retries: 30
       delay: 5
       until: vip_ready.rc == 0
       changed_when: false
-      environment:
-        KUBECONFIG: "/home/kosa/.kube/config"
 
     # =====================================================
     # 4. Calico 설치
@@ -147,12 +162,15 @@
     - name: Get worker join command
       shell: kubeadm token create --print-join-command
       register: worker_join
+      no_log: true
 
     - name: Get certificate key
       shell: kubeadm init phase upload-certs --upload-certs
       register: cert_key_raw
+      no_log: true
 
     - name: Set join facts
       set_fact:
         worker_join_cmd: "{{ worker_join.stdout }}"
         cert_key: "{{ cert_key_raw.stdout_lines[-1] }}"
+      no_log: true

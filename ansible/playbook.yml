@@ -3,7 +3,6 @@
 - import_playbook: playbook/02_setup.yml
 - import_playbook: playbook/03_init.yml
 - import_playbook: playbook/04_join.yml
-- import_playbook: playbook/05_post.yml
 
 # 실행
 # ansible-playbook playbook.yml

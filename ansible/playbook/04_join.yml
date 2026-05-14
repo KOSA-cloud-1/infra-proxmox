@@ -16,6 +16,7 @@
         --certificate-key {{ hostvars['cp1']['cert_key'] }}
       args:
         creates: /etc/kubernetes/admin.conf
+      no_log: true
 
     # =====================================================
     # 2. kubeconfig 디렉토리 생성
@@ -26,6 +27,7 @@
         state: directory
         owner: kosa
         group: kosa
+        mode: '0700'
 
     # =====================================================
     # 3. kubeconfig 복사
@@ -37,6 +39,7 @@
         remote_src: yes
         owner: kosa
         group: kosa
+        mode: '0600'
 
 
 # =========================================================
@@ -53,3 +56,4 @@
       shell: "{{ hostvars['cp1']['worker_join_cmd'] }}"
       args:
         creates: /etc/kubernetes/kubelet.conf
+      no_log: true
