@@ -18,7 +18,7 @@
         ctr -n k8s.io run --rm --net-host ghcr.io/kube-vip/kube-vip:v0.8.0 vip /kube-vip manifest pod \
           --interface {{ vip_interface }} \
           --address {{ vip_address }} \
-          --vipSubnet {{ vip_cidr }} \
+          --vipSubnet /{{ vip_cidr }} \
           --controlplane \
           --arp \
           --leaderElection \
