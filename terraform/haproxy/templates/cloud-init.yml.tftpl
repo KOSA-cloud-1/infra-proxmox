@@ -1,0 +1,71 @@
+#cloud-config
+package_update: true
+package_upgrade: false
+
+packages:
+  - haproxy
+  - keepalived
+
+write_files:
+  - path: /etc/sysctl.d/99-haproxy-keepalived.conf
+    owner: root:root
+    permissions: '0644'
+    content: |
+      net.ipv4.ip_nonlocal_bind=1
+
+  - path: /etc/haproxy/haproxy.cfg
+    owner: root:root
+    permissions: '0644'
+    content: |
+      ${indent(6, haproxy_config)}
+
+  - path: /etc/keepalived/keepalived.conf
+    owner: root:root
+    permissions: '0600'
+    content: |
+      global_defs {
+        router_id ${keepalived_router_id}
+        enable_script_security
+        script_user root
+      }
+
+      vrrp_script chk_haproxy {
+        script "/usr/bin/systemctl is-active --quiet haproxy"
+        interval 2
+        fall 2
+        rise 2
+        weight -30
+      }
+
+      vrrp_instance VI_1 {
+        state BACKUP
+        interface ${keepalived_interface}
+        virtual_router_id ${virtual_router_id}
+        priority ${keepalived_priority}
+        advert_int 1
+        unicast_src_ip ${keepalived_unicast_src}
+%{ if length(keepalived_peers) > 0 ~}
+        unicast_peer {
+%{ for peer in keepalived_peers ~}
+          ${peer}
+%{ endfor ~}
+        }
+%{ endif ~}
+        authentication {
+          auth_type PASS
+          auth_pass ${keepalived_auth_pass}
+        }
+        virtual_ipaddress {
+          ${haproxy_vip}/${dmz_prefix_length} dev ${keepalived_interface}
+        }
+        track_script {
+          chk_haproxy
+        }
+      }
+
+runcmd:
+  - sysctl --system
+  - systemctl enable haproxy keepalived
+  - haproxy -c -f /etc/haproxy/haproxy.cfg
+  - systemctl restart haproxy
+  - systemctl restart keepalived

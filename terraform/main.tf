@@ -5,7 +5,7 @@ resource "proxmox_virtual_environment_vm" "k8s" {
   # 기본 VM 정보
   # =========================================================
   name      = each.key
-  vm_id = each.value.id
+  vm_id     = each.value.id
   node_name = each.value.node
 
   # =========================================================
@@ -70,9 +70,9 @@ resource "proxmox_virtual_environment_vm" "k8s" {
     # VM 계정 설정
     # -------------------------------------------------------
     user_account {
-    #  username = var.vm_user
-    #  password = var.vm_password
-      keys     = [var.ssh_public_key]
+      #  username = var.vm_user
+      #  password = var.vm_password
+      keys = [var.ssh_public_key]
     }
 
     # -------------------------------------------------------
@@ -104,9 +104,9 @@ resource "proxmox_virtual_environment_vm" "k8s" {
     size         = 20
 
     # Ceph + Kubernetes면 권장
-    discard      = "on"
-    iothread     = true
-    ssd          = true
+    discard  = "on"
+    iothread = true
+    ssd      = true
   }
 
   # =========================================================
@@ -118,9 +118,9 @@ resource "proxmox_virtual_environment_vm" "k8s" {
   # 관리망 (1G)
   # ---------------------------------------------------------
   network_device {
-    bridge   = "vmbr0"
-    model    = "virtio"
-    vlan_id  = 40
+    bridge  = "vmbr0"
+    model   = "virtio"
+    vlan_id = 40
   }
 
   # ---------------------------------------------------------
