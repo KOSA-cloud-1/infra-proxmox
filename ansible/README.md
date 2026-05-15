@@ -41,11 +41,15 @@ worker에는 `admin.conf` 대신 읽기 전용 kubeconfig를 배포합니다.
 - 작업 PC 또는 Ansible VM에서 관리망 IP로 SSH 가능
 - 관리망 IP는 `eth0`, 10G node IP는 `eth1`에 설정
 - 모든 노드의 10G node IP가 서로 통신 가능
-- 작업 PC 또는 Ansible VM에 Ansible 설치
+- 작업 PC 또는 Ansible VM에 Ansible 2.10.8 설치
 
 ```bash
-brew install ansible
+cd infra-proxmox/ansible
+ansible --version
 ```
+
+이 playbook은 Ansible 2.10.8 기준으로 작성합니다.
+`ansible --version` 출력에 `ansible 2.10.8`이 보여야 합니다.
 
 ## Inventory 작성
 
