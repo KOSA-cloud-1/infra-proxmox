@@ -56,15 +56,28 @@ variable "ssh_public_key" {
 # Kubernetes VM 구성
 # =========================================================
 
-variable "virtual_machines" {
-  description = "생성할 Kubernetes VM 목록"
-
+variable "cp_nodes" {
   type = map(object({
     id     = number
     node   = string
-    ip     = string
+    ip1g   = string
+    ip10g  = string
     cpu    = number
     memory = number
   }))
 }
 
+variable "worker_nodes" {
+  type = map(object({
+    id     = number
+    node   = string
+    ip1g   = string
+    ip10g  = string
+    cpu    = number
+    memory = number
+  }))
+}
+
+variable "gateway" {
+  type        = string
+}
