@@ -1,0 +1,56 @@
+# =========================================================
+# Proxmox API 접속 정보
+# =========================================================
+
+virtual_environment_endpoint  = "https://YOUR_PROXMOX_IP:8006/"
+virtual_environment_api_token = "YOUR_API_TOKEN"
+
+# =========================================================
+# Template / SSH
+# =========================================================
+
+template_vm_id       = 8000
+template_node_name   = "team14"
+ssh_public_key       = "YOUR_SSH_PUBLIC_KEY"
+keepalived_auth_pass = "CHANGEME"
+
+# VM 내부 NIC 이름은 cloud image에 따라 eth0 또는 ens18일 수 있습니다.
+keepalived_interface = "eth0"
+
+# =========================================================
+# VLAN20 DMZ / VLAN40 Ingress
+# =========================================================
+
+dmz_bridge        = "vmbr0"
+dmz_vlan_id       = 20
+dmz_prefix_length = 24
+dmz_gateway       = "172.17.32.1"
+
+haproxy_vip = "172.17.32.200"
+ingress_vip = "172.17.131.200"
+
+# =========================================================
+# On-Prem HAProxy VM 구성
+# =========================================================
+
+haproxy_instances = {
+  haproxy-1 = {
+    id                  = 1021
+    node                = "team12"
+    ip                  = "172.17.32.21"
+    cpu                 = 2
+    memory              = 2048
+    disk_size           = 20
+    keepalived_priority = 110
+  }
+
+  haproxy-2 = {
+    id                  = 1022
+    node                = "team13"
+    ip                  = "172.17.32.22"
+    cpu                 = 2
+    memory              = 2048
+    disk_size           = 20
+    keepalived_priority = 100
+  }
+}
