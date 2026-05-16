@@ -15,20 +15,8 @@
       changed_when: true
       failed_when: false
 
-    # =====================================================
-    # kubelet 중지
-    # - static pod 재생성 방지
-    # =====================================================
+    # static pod 재생성 방지
     - name: Stop kubelet
-      systemd:
-        name: kubelet
-        state: stopped
-      failed_when: false
-    # =====================================================
-    # kubelet 중지
-    # - static pod 재생성 방지
-    # =====================================================
-    - name: Stop kubelet before removing Kubernetes files
       systemd:
         name: kubelet
         state: stopped

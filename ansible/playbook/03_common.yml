@@ -168,7 +168,7 @@
     # =====================================================
     - name: Download Kubernetes GPG key
       get_url:
-        url: https://pkgs.k8s.io/core:/stable:/v1.30/deb/Release.key
+        url: https://pkgs.k8s.io/core:/stable:/v{{ kube_minor_version }}/deb/Release.key
         dest: /tmp/kubernetes.key
         mode: '0644'
 
@@ -187,7 +187,7 @@
         dest: /etc/apt/sources.list.d/kubernetes.list
         mode: '0644'
         content: |
-          deb [signed-by=/etc/apt/keyrings/kubernetes.gpg] https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /
+          deb [signed-by=/etc/apt/keyrings/kubernetes.gpg] https://pkgs.k8s.io/core:/stable:/v{{ kube_minor_version }}/deb/ /
 
     # =====================================================
     # Kubernetes repository 반영을 위한 apt update

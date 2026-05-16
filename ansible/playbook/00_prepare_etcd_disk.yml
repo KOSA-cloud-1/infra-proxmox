@@ -1,9 +1,6 @@
 - name: Prepare local disk for etcd
   hosts: cp1,cp2,cp3
   become: true
-  vars:
-    etcd_disk: /dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi1
-    etcd_mount: /var/lib/etcd
 
   tasks:
     # =====================================================

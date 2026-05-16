@@ -2,30 +2,22 @@
   hosts: k8s
   become: true
   gather_facts: true
-  
+
   tasks:
-    # =====================================================
-    # hostname 설정
-    # =====================================================
     - name: Set hostname
-      ansible.builtin.hostname:
+      hostname:
         name: "{{ inventory_hostname }}"
 
-    # =====================================================
     # cloud-init이 /etc/hosts를 다시 덮어쓰지 않도록 설정
-    # =====================================================
     - name: Disable cloud-init hosts management
-      ansible.builtin.lineinfile:
+      lineinfile:
         path: /etc/cloud/cloud.cfg
         regexp: '^manage_etc_hosts:'
         line: 'manage_etc_hosts: false'
         create: true
 
-    # =====================================================
-    # /etc/hosts 전체 생성
-    # =====================================================
     - name: Configure /etc/hosts for Kubernetes nodes
-      ansible.builtin.copy:
+      copy:
         dest: /etc/hosts
         owner: root
         group: root
@@ -44,24 +36,21 @@
           ff02::1 ip6-allnodes
           ff02::2 ip6-allrouters
 
-    # =====================================================
-    # hostname 확인
-    # =====================================================
     - name: Check hostname
-      ansible.builtin.command: hostname
+      command: hostname
       register: hostname_result
       changed_when: false
 
     - name: Check hosts resolution
-      ansible.builtin.command: getent hosts {{ item }}
+      command: getent hosts {{ item }}
       loop: "{{ groups['k8s'] + [vip_hostname] }}"
       register: hosts_resolution_result
       changed_when: false
 
     - name: Print hostname
-      ansible.builtin.debug:
+      debug:
         msg: "{{ hostname_result.stdout }}"
 
     - name: Print hosts resolution
-      ansible.builtin.debug:
+      debug:
         var: hosts_resolution_result.results

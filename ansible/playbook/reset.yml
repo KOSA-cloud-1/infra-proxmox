@@ -208,19 +208,19 @@
     # etcd 디스크 완전 포맷 (재설치 시 클린 슬레이트)
     # =====================================================
     - name: Unmount etcd disk before format
-      shell: umount /var/lib/etcd 2>/dev/null || true
+      shell: umount {{ etcd_mount }} 2>/dev/null || true
       when: inventory_hostname in groups['control_plane']
 
     - name: Format etcd disk fresh for clean reinstall
-      command: mkfs.ext4 -F /dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi1
+      command: mkfs.ext4 -F {{ etcd_disk }}
       when: inventory_hostname in groups['control_plane']
       # ignore_errors 제거 → 포맷 실패 시 명확하게 에러 표시
 
     - name: Mount etcd disk temporarily to remove lost+found
       shell: |
-        mount /dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi1 /var/lib/etcd 2>/dev/null || true
-        rm -rf /var/lib/etcd/lost+found
-        umount /var/lib/etcd 2>/dev/null || true
+        mount {{ etcd_disk }} {{ etcd_mount }} 2>/dev/null || true
+        rm -rf {{ etcd_mount }}/lost+found
+        umount {{ etcd_mount }} 2>/dev/null || true
       when: inventory_hostname in groups['control_plane']
       ignore_errors: yes
 
