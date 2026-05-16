@@ -1,0 +1,131 @@
+# =========================================================
+# 모든 노드가 클러스터에 조인된 이후 Calico CNI 설치
+# - CNI가 설치되기 전까지 노드는 NotReady 상태일 수 있음
+# - Calico 설치 후 Pod 네트워크가 구성되면 노드가 Ready 상태로 전환됨
+# =========================================================
+- name: Install Calico Network Plugin
+  hosts: cp1
+  become: true
+  become_user: root
+
+  tasks:
+
+    # =====================================================
+    # Kubernetes API Server 준비 상태 확인
+    # - Calico manifest를 적용하려면 API Server가 먼저 정상 응답해야 함
+    # - 여기서는 cp1의 실제 node_ip 또는 ansible_host 기준으로 API Server에 접근
+    # =====================================================
+    - name: Wait for Kubernetes API Server readiness
+      command: >
+        kubectl --kubeconfig=/etc/kubernetes/admin.conf
+        --server=https://{{ node_ip | default(ansible_host) }}:6443
+        --request-timeout=10s
+        get --raw=/readyz
+      register: cluster_ready
+      retries: 30
+      delay: 5
+      until: cluster_ready.rc == 0
+      changed_when: false
+
+    # =====================================================
+    # Calico manifest 렌더링
+    # - calico.yaml 안에 {{ pod_cidr }}, {{ node_cidr }} 같은 Ansible 변수가 있음
+    # - 단순 복사(copy)가 아니라 template 모듈로 렌더링해야 실제 값으로 치환됨
+    # =====================================================
+    - name: Render Calico manifest
+      template:
+        src: ../files/calico.yaml
+        dest: /tmp/calico.yaml
+        mode: '0644'
+
+    # =====================================================
+    # Calico CNI 설치
+    # - /tmp/calico.yaml을 Kubernetes 클러스터에 적용
+    # - Calico 관련 Namespace, ServiceAccount, RBAC, DaemonSet 등이 생성됨
+    # =====================================================
+    - name: Apply Calico manifest
+      shell: |
+        kubectl --kubeconfig=/etc/kubernetes/admin.conf \
+          --server=https://{{ node_ip | default(ansible_host) }}:6443 \
+          --request-timeout=10s \
+          apply -f /tmp/calico.yaml
+      register: calico_apply
+      retries: 5
+      delay: 10
+      until: calico_apply.rc == 0
+
+    # =====================================================
+    # Calico DaemonSet 배포 완료 대기
+    # - calico-node는 각 Kubernetes 노드마다 1개씩 실행되는 DaemonSet
+    # - 모든 노드에서 calico-node가 정상 기동될 때까지 대기
+    # =====================================================
+    - name: Wait for Calico daemonset rollout
+      command: >
+        kubectl --kubeconfig=/etc/kubernetes/admin.conf
+        --server=https://{{ node_ip | default(ansible_host) }}:6443
+        --request-timeout=10s
+        -n kube-system rollout status daemonset/calico-node --timeout=10m
+      changed_when: false
+
+    # =====================================================
+    # Calico Pod 상태 확인
+    # - calico-node, calico-kube-controllers 상태를 확인하기 위한 출력용 작업
+    # - 실패 처리는 하지 않고 상태 확인 목적으로만 사용
+    # =====================================================
+    - name: Get Calico pod status
+      command: >
+        kubectl --kubeconfig=/etc/kubernetes/admin.conf
+        --server=https://{{ node_ip | default(ansible_host) }}:6443
+        --request-timeout=10s
+        -n kube-system get pods -o wide
+      register: calico_pods_status
+      changed_when: false
+
+    # =====================================================
+    # Calico Pod 상태 출력
+    # - playbook 실행 결과에서 kube-system Pod 상태를 바로 확인하기 위함
+    # =====================================================
+    - name: Print Calico pod status
+      debug:
+        msg: "{{ calico_pods_status.stdout }}"
+
+    # =====================================================
+    # 모든 노드 Ready 상태 대기
+    # - CNI 설치 직후에는 노드가 Ready로 바뀌는 데 시간이 걸릴 수 있음
+    # - 모든 노드가 Ready 상태가 될 때까지 반복 확인
+    # =====================================================
+    - name: Wait for all nodes to become Ready
+      shell: |
+        set -o pipefail
+        kubectl --kubeconfig=/etc/kubernetes/admin.conf \
+          --server=https://{{ node_ip | default(ansible_host) }}:6443 \
+          --request-timeout=10s \
+          get nodes --no-headers | awk '{print $2}' | grep -v '^Ready$' || true
+      args:
+        executable: /bin/bash
+      register: not_ready_nodes
+      retries: 30
+      delay: 10
+      until: not_ready_nodes.stdout | trim == ""
+      changed_when: false
+
+    # =====================================================
+    # 최종 노드 상태 확인
+    # - 모든 control-plane / worker 노드의 Ready 여부와 Internal-IP 확인
+    # =====================================================
+    - name: Verify all nodes are Ready
+      command: >
+        kubectl --kubeconfig=/etc/kubernetes/admin.conf
+        --server=https://{{ node_ip | default(ansible_host) }}:6443
+        --request-timeout=10s
+        get nodes -o wide
+      register: nodes_status
+      changed_when: false
+
+    # =====================================================
+    # 최종 클러스터 상태 출력
+    # - playbook 마지막에 전체 노드 상태를 보기 좋게 출력
+    # =====================================================
+    - name: Print cluster node status
+      debug:
+        msg: "{{ nodes_status.stdout }}"

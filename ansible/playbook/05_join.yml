@@ -1,4 +1,68 @@
 # =========================================================
+# Prepare fresh kubeadm join data
+# =========================================================
+- name: Prepare kubeadm join data
+  hosts: cp1
+  become: true
+  become_user: root
+
+  tasks:
+
+    - name: Wait for Kubernetes API on cp1
+      command: >
+        kubectl --kubeconfig=/etc/kubernetes/admin.conf
+        --server=https://{{ node_ip | default(ansible_host) }}:6443
+        --request-timeout=10s
+        get --raw=/readyz
+      register: cp1_readyz
+      changed_when: false
+      retries: 30
+      delay: 5
+      until: cp1_readyz.rc == 0
+
+    - name: Create fresh worker join command
+      command: kubeadm token create --print-join-command
+      register: worker_join
+      no_log: "{{ hide_join_secrets | default(true) | bool }}"
+
+    - name: Upload control-plane certificates and get certificate key
+      command: kubeadm init phase upload-certs --upload-certs
+      register: cert_key_raw
+      no_log: "{{ hide_join_secrets | default(true) | bool }}"
+
+    - name: Set join facts
+      set_fact:
+        worker_join_cmd: "{{ worker_join.stdout | trim }}"
+        cert_key: "{{ cert_key_raw.stdout_lines[-1] | trim }}"
+      no_log: "{{ hide_join_secrets | default(true) | bool }}"
+
+    - name: Ensure local files directory exists
+      file:
+        path: "../files"
+        state: directory
+        mode: '0700'
+      delegate_to: localhost
+      become: false
+
+    - name: Save worker join command to local file
+      copy:
+        dest: "../files/worker_join_cmd.txt"
+        content: "{{ worker_join.stdout | trim }}\n"
+        mode: '0600'
+      delegate_to: localhost
+      become: false
+      no_log: "{{ hide_join_secrets | default(true) | bool }}"
+
+    - name: Save certificate key to local file
+      copy:
+        dest: "../files/cert_key.txt"
+        content: "{{ cert_key_raw.stdout_lines[-1] | trim }}\n"
+        mode: '0600'
+      delegate_to: localhost
+      become: false
+      no_log: "{{ hide_join_secrets | default(true) | bool }}"
+
+# =========================================================
 # CP2, CP3 - Control Plane Join
 # =========================================================
 - name: Join additional control planes
@@ -8,6 +72,61 @@
 
   tasks:
 
+    - name: Check control-plane admin config
+      stat:
+        path: /etc/kubernetes/admin.conf
+      register: control_plane_admin_conf
+
+    - name: Check local etcd manifest
+      stat:
+        path: /etc/kubernetes/manifests/etcd.yaml
+      register: control_plane_etcd_manifest
+
+    - name: Set control-plane completion fact
+      set_fact:
+        control_plane_complete: "{{ control_plane_admin_conf.stat.exists and control_plane_etcd_manifest.stat.exists }}"
+
+    - name: Remove stale etcd member for partial control-plane join
+      shell: |
+        eid=$(crictl ps --name etcd -q | head -n1)
+        mid=$(crictl exec "$eid" etcdctl \
+          --endpoints=https://127.0.0.1:2379 \
+          --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+          --cert=/etc/kubernetes/pki/etcd/server.crt \
+          --key=/etc/kubernetes/pki/etcd/server.key \
+          member list | awk -F", " '/{{ node_ip | default(ansible_host) }}/ {print $1; exit}')
+        if [ -n "$mid" ]; then
+          crictl exec "$eid" etcdctl \
+            --endpoints=https://127.0.0.1:2379 \
+            --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+            --cert=/etc/kubernetes/pki/etcd/server.crt \
+            --key=/etc/kubernetes/pki/etcd/server.key \
+            member remove "$mid"
+        fi
+      delegate_to: cp1
+      when: control_plane_admin_conf.stat.exists and not control_plane_etcd_manifest.stat.exists
+
+    - name: Reset partial control-plane join state
+      shell: |
+        systemctl stop kubelet || true
+        kubeadm reset -f || true
+        for name in kube-apiserver kube-controller-manager kube-scheduler etcd; do
+          pkill -x "$name" 2>/dev/null || true
+        done
+        ps -eo pid=,comm=,args= | awk '$2 == "containerd-shim-runc-v2" && $0 ~ /-namespace k8s.io/ {print $1}' | xargs -r kill 2>/dev/null || true
+        rm -rf /etc/kubernetes /var/lib/kubelet /etc/cni/net.d /opt/cni /var/lib/cni /root/.kube /home/kosa/.kube
+        mkdir -p /var/lib/etcd
+        find /var/lib/etcd -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+        ip link delete tunl0 2>/dev/null || true
+        ip route flush proto bird 2>/dev/null || true
+        systemctl restart containerd
+      when: control_plane_admin_conf.stat.exists and not control_plane_etcd_manifest.stat.exists
+
+    - name: Pull control-plane images
+      command: kubeadm config images pull --kubernetes-version v{{ kube_version }}
+      changed_when: false
+      when: not control_plane_complete
+
     - name: Join control plane
       shell: >
         {{ hostvars['cp1']['worker_join_cmd'] }}
@@ -15,12 +134,10 @@
         --apiserver-advertise-address {{ node_ip | default(ansible_host) }}
         --certificate-key {{ hostvars['cp1']['cert_key'] }}
       args:
-        creates: /etc/kubernetes/admin.conf
-      no_log: true
+        creates: /etc/kubernetes/manifests/etcd.yaml
+      register: control_plane_join_result
+      no_log: "{{ hide_join_secrets | default(true) | bool }}"
 
-    # =====================================================
-    # 2. kubeconfig 디렉토리 생성
-    # =====================================================
     - name: Setup kubeconfig directory
       file:
         path: /home/kosa/.kube
@@ -29,9 +146,6 @@
         group: kosa
         mode: '0700'
 
-    # =====================================================
-    # 3. kubeconfig 복사
-    # =====================================================
     - name: Copy kubeconfig
       copy:
         src: /etc/kubernetes/admin.conf
@@ -40,6 +154,14 @@
         owner: kosa
         group: kosa
         mode: '0600'
+
+    - name: Remove wrong KUBECONFIG from kosa bashrc on control-plane nodes
+      lineinfile:
+        path: /home/kosa/.bashrc
+        regexp: '^export KUBECONFIG=/etc/kubernetes/admin\.conf$'
+        state: absent
+      failed_when: false
+
 
 
 # =========================================================
@@ -58,12 +180,13 @@
       register: worker_kubelet_conf
 
     - name: Join worker
-      shell: "{{ hostvars['cp1']['worker_join_cmd'] }}"
+      shell: >
+        {{ hostvars['cp1']['worker_join_cmd'] }}
+        --node-name {{ inventory_hostname }}
       args:
         creates: /etc/kubernetes/kubelet.conf
-      failed_when: false
-      no_log: true
-      when: not worker_kubelet_conf.stat.exists
+      register: worker_join_result
+      no_log: "{{ hide_join_secrets | default(true) | bool }}"
 
     - name: Check worker kubelet config after join
       stat:
@@ -212,6 +335,14 @@
         mode: '0600'
       no_log: true
 
+    - name: Remove wrong KUBECONFIG from kosa bashrc on worker nodes
+      lineinfile:
+        path: /home/kosa/.bashrc
+        regexp: '^export KUBECONFIG=/etc/kubernetes/admin\.conf$'
+        state: absent
+      failed_when: false
+
+
     - name: Verify worker read-only kubeconfig
       become_user: kosa
       command: kubectl --kubeconfig=/home/kosa/.kube/config get node {{ inventory_hostname }}
@@ -220,3 +351,14 @@
       retries: 30
       delay: 5
       until: worker_readonly_check.rc == 0
+
+    - name: Remove local join secret files after cluster join
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "../files/worker_join_cmd.txt"
+        - "../files/cert_key.txt"
+      delegate_to: localhost
+      become: false
+      no_log: true
