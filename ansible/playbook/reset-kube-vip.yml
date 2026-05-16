@@ -1,0 +1,237 @@
+- name: Reset Kubernetes control-plane nodes
+  hosts: kube_vip
+  become: true
+  gather_facts: false
+
+  tasks:
+    # =====================================================
+    # kubeadm reset
+    # - kubeadm init/join으로 생성된 노드 상태 정리
+    # - control-plane 노드에서는 local stacked etcd member 제거 시도
+    # =====================================================
+    - name: Run kubeadm reset
+      command: kubeadm reset -f
+      register: kubeadm_reset
+      changed_when: true
+      failed_when: false
+
+    # =====================================================
+    # kubelet 중지
+    # - static pod 재생성 방지
+    # =====================================================
+    - name: Stop kubelet
+      systemd:
+        name: kubelet
+        state: stopped
+      failed_when: false
+    # =====================================================
+    # kubelet 중지
+    # - static pod 재생성 방지
+    # =====================================================
+    - name: Stop kubelet before removing Kubernetes files
+      systemd:
+        name: kubelet
+        state: stopped
+        enabled: true
+      failed_when: false
+
+    # =====================================================
+    # static pod manifest 먼저 삭제
+    # - kube-apiserver / controller-manager / scheduler / etcd / kube-vip 재생성 방지
+    # =====================================================
+    - name: Remove Kubernetes static pod manifests first
+      file:
+        path: /etc/kubernetes/manifests
+        state: absent
+      failed_when: false
+
+    # =====================================================
+    # 남아 있는 Kubernetes 컨테이너 정리
+    # - containerd/crictl 기준
+    # =====================================================
+    - name: Stop and remove remaining Kubernetes containers via crictl
+      shell: |
+        if command -v crictl >/dev/null 2>&1; then
+          crictl ps -q | xargs -r crictl stop || true
+          crictl ps -a -q | xargs -r crictl rm || true
+          crictl pods -q | xargs -r crictl stopp || true
+          crictl pods -q | xargs -r crictl rmp || true
+        fi
+      changed_when: true
+      failed_when: false
+
+    # =====================================================
+    # control-plane 프로세스 종료 대기
+    # =====================================================
+    - name: Wait until control-plane processes are stopped
+      shell: |
+        for i in $(seq 1 30); do
+          if ! pgrep -f 'kube-apiserver|kube-controller-manager|kube-scheduler|etcd' >/dev/null; then
+            exit 0
+          fi
+          sleep 2
+        done
+        exit 1
+      register: wait_cp_processes
+      changed_when: false
+      failed_when: false
+
+    # =====================================================
+    # 그래도 남아 있으면 강제 종료
+    # - reset 전용 playbook에서만 사용
+    # =====================================================
+    - name: Force kill remaining Kubernetes control-plane processes
+      shell: |
+        pkill -9 -f kube-apiserver || true
+        pkill -9 -f kube-controller-manager || true
+        pkill -9 -f kube-scheduler || true
+        pkill -9 -f etcd || true
+      changed_when: true
+      failed_when: false
+
+    # =====================================================
+    # /var/lib/etcd 사용 해제 대기
+    # =====================================================
+    - name: Wait until /var/lib/etcd is not busy
+      shell: |
+        for i in $(seq 1 15); do
+          if ! fuser /var/lib/etcd >/dev/null 2>&1; then
+            exit 0
+          fi
+          sleep 2
+        done
+
+        echo "/var/lib/etcd is still busy:"
+        fuser -v /var/lib/etcd || true
+        exit 1
+      changed_when: false
+      failed_when: false
+    # =====================================================
+    # Kubernetes static pod / 인증서 / kubeconfig 삭제
+    # - kube-vip manifest도 /etc/kubernetes/manifests 안에 있으므로 같이 삭제됨
+    # =====================================================
+    - name: Remove Kubernetes directories
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/kubernetes
+        - /var/lib/kubelet/pki
+        - /var/lib/kubelet/plugins
+        - /var/lib/kubelet/plugins_registry
+        - /var/lib/kubelet/pod-resources
+        - /var/lib/kubelet/checkpoints
+        - /etc/cni/net.d
+        - /var/lib/cni
+        
+    - name: Clean contents inside /var/lib/etcd without removing mount point
+      shell: |
+        if mountpoint -q /var/lib/etcd; then
+          find /var/lib/etcd -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+        else
+          rm -rf /var/lib/etcd/*
+          rm -rf /var/lib/etcd/.[!.]*
+          rm -rf /var/lib/etcd/..?*
+        fi
+      changed_when: true
+
+    # =====================================================
+    # kubectl admin config 삭제
+    # - root 기준 ~/.kube 삭제
+    # - 일반 사용자 홈은 별도 처리 필요할 수 있음
+    # =====================================================
+    - name: Remove root kubeconfig
+      file:
+        path: /root/.kube
+        state: absent
+
+    # =====================================================
+    # 남아 있는 control-plane 프로세스 종료 확인용
+    # - kubeadm reset 후에도 static pod 프로세스가 잠깐 남을 수 있음
+    # =====================================================
+    - name: Wait for control-plane ports to be released
+      shell: |
+        for i in $(seq 1 30); do
+          if ! ss -lntp | grep -E '(:6443|:2379|:2380|:10257|:10259)' >/dev/null; then
+            exit 0
+          fi
+          sleep 2
+        done
+
+        echo "Control-plane ports are still in use:"
+        ss -lntp | grep -E '(:6443|:2379|:2380|:10257|:10259)' || true
+        exit 1
+      register: port_wait
+      changed_when: false
+
+    # =====================================================
+    # 컨테이너 런타임 정리
+    # - containerd 기준
+    # - kubelet이 만든 종료된 컨테이너/샌드박스 정리
+    # =====================================================
+    - name: Remove stopped Kubernetes containers via crictl
+      shell: |
+        crictl rm -a || true
+        crictl rmp -a || true
+      changed_when: false
+      failed_when: false
+
+    # =====================================================
+    # iptables 정리
+    # - kubeadm reset은 kube-proxy가 만든 iptables rule을 자동 정리하지 않음
+    # - 실습 환경에서 완전 초기화하려면 수행
+    # =====================================================
+    - name: Flush iptables rules
+      shell: |
+        iptables -F || true
+        iptables -t nat -F || true
+        iptables -t mangle -F || true
+        iptables -X || true
+      changed_when: true
+      failed_when: false
+
+    # =====================================================
+    # IPVS 사용하는 경우 정리
+    # - ipvsadm 없으면 무시
+    # =====================================================
+    - name: Clear IPVS rules if ipvsadm exists
+      shell: |
+        if command -v ipvsadm >/dev/null 2>&1; then
+          ipvsadm --clear
+        fi
+      changed_when: true
+      failed_when: false
+
+    # =====================================================
+    # kubelet 재시작
+    # - reset 이후 다음 kubeadm init/join을 받을 준비
+    # =====================================================
+    - name: Start kubelet
+      systemd:
+        name: kubelet
+        state: started
+        enabled: true
+      failed_when: false
+
+    # =====================================================
+    # 최종 확인
+    # =====================================================
+    - name: Check remaining Kubernetes control-plane ports
+      shell: ss -lntp | grep -E '(:6443|:2379|:2380|:10257|:10259)' || true
+      register: remaining_k8s_ports
+      changed_when: false
+
+    - name: Show remaining ports
+      debug:
+        msg: |
+          Remaining Kubernetes control-plane ports:
+          {{ remaining_k8s_ports.stdout | default('') }}
+
+    - name: Fail if Kubernetes control-plane ports are still in use
+      fail:
+        msg: |
+          Kubernetes control-plane ports are still in use after reset.
+
+          Remaining ports:
+          {{ remaining_k8s_ports.stdout }}
+      when: remaining_k8s_ports.stdout | length > 0

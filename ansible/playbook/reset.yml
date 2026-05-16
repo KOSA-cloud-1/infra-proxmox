@@ -1,0 +1,291 @@
+# =========================================================
+# STEP 1 - CLEAN CLUSTER STATE FROM cp1 (ETCD OWNER)
+# =========================================================
+- name: STEP 1 - Remove nodes from cluster (cp1 only)
+  hosts: cp1
+  become: true
+
+  tasks:
+
+    - name: check admin.conf exists
+      stat:
+        path: /etc/kubernetes/admin.conf
+      register: admin_conf
+
+    - name: get all nodes except cp1
+      shell: |
+        kubectl --kubeconfig=/etc/kubernetes/admin.conf get nodes -o name | cut -d'/' -f2 | grep -v cp1
+      register: node_list
+      ignore_errors: yes
+      failed_when: false
+      when: admin_conf.stat.exists
+
+    - name: delete nodes from cluster
+      shell: |
+        kubectl --kubeconfig=/etc/kubernetes/admin.conf delete node {{ item }} --ignore-not-found
+      loop: "{{ node_list.stdout_lines | default([]) }}"
+      ignore_errors: yes
+      when: admin_conf.stat.exists and node_list.stdout_lines | default([]) | length > 0
+
+    - name: remove kube-vip manifest
+      file:
+        path: /etc/kubernetes/manifests/kube-vip.yaml
+        state: absent
+      ignore_errors: yes
+
+
+# =========================================================
+# STEP 2 - RESET ALL NODES
+# =========================================================
+- name: STEP 2 - Reset ALL nodes
+  hosts: control_plane:workers
+  become: true
+
+  tasks:
+
+    - name: stop kubelet
+      service:
+        name: kubelet
+        state: stopped
+        enabled: no
+      ignore_errors: yes
+
+    - name: Stop all running containers via crictl
+      shell: |
+        crictl ps -q 2>/dev/null | xargs -r crictl stop --timeout 5 || true
+      ignore_errors: yes
+
+    - name: kubeadm reset
+      command: timeout 60s kubeadm reset -f
+      ignore_errors: yes
+
+    - name: Kill K8s control plane processes
+      shell: |
+        for name in kube-apiserver kube-controller-manager kube-scheduler etcd; do
+          pkill -x "$name" 2>/dev/null || true
+        done
+      ignore_errors: yes
+
+    - name: stop container runtime
+      service:
+        name: "{{ item }}"
+        state: stopped
+      loop:
+        - kubelet
+        - containerd
+      ignore_errors: yes
+
+    - name: Kill orphaned containerd shim processes
+      shell: |
+        ps -eo pid=,comm=,args= | awk '$2 == "containerd-shim-runc-v2" && $0 ~ /-namespace k8s.io/ {print $1}' | xargs -r kill -9 2>/dev/null || true
+      ignore_errors: yes
+
+    - name: unmount kubelet pod mounts
+      shell: |
+        grep /var/lib/kubelet /proc/self/mountinfo | awk '{print $5}' | sort -r | xargs -r umount -lf
+      ignore_errors: yes
+
+    # CP 노드만 etcd 디스크가 마운트되어 있음
+    - name: Clear etcd data directory contents before unmounting
+      shell: find /var/lib/etcd -mindepth 1 -delete 2>/dev/null || true
+      when: inventory_hostname in groups['control_plane']
+      ignore_errors: yes
+
+    - name: unmount etcd disk
+      mount:
+        path: /var/lib/etcd
+        state: unmounted
+      ignore_errors: yes
+      when: inventory_hostname in groups['control_plane']
+
+    - name: remove etcd from fstab
+      mount:
+        path: /var/lib/etcd
+        state: absent
+      ignore_errors: yes
+      when: inventory_hostname in groups['control_plane']
+
+    # =====================================================
+    # 디렉토리 완전 삭제
+    # =====================================================
+    - name: remove k8s dirs
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/kubernetes
+        - /var/lib/kubelet
+        - /var/lib/etcd
+        - /var/lib/containerd
+        - /etc/cni/net.d
+        - /opt/cni
+        - /var/lib/cni
+        - /root/.kube
+        - /home/kosa/.kube
+        - /tmp/calico.yaml
+      ignore_errors: yes
+
+    # =====================================================
+    # kubeconfig 환경변수 제거
+    # =====================================================
+    - name: remove KUBECONFIG env
+      lineinfile:
+        path: "{{ item }}"
+        regexp: '^export KUBECONFIG'
+        state: absent
+      loop:
+        - /home/kosa/.bashrc
+        - /home/kosa/.bash_profile
+        - /root/.bashrc
+        - /root/.bash_profile
+      ignore_errors: yes
+
+    # =====================================================
+    # 네트워크 인터페이스 정리
+    # =====================================================
+    - name: delete network interfaces
+      shell: |
+        ip link delete cni0 2>/dev/null || true
+        ip link delete flannel.1 2>/dev/null || true
+        ip link delete tunl0 2>/dev/null || true
+        ip link delete vxlan.calico 2>/dev/null || true
+        ip link delete cali0 2>/dev/null || true
+      ignore_errors: yes
+
+    # =====================================================
+    # iptables 초기화
+    # =====================================================
+    - name: flush iptables
+      shell: |
+        iptables -F
+        iptables -t nat -F
+        iptables -t mangle -F
+        iptables -X
+        ipvsadm --clear 2>/dev/null || true
+      ignore_errors: yes
+
+    # =====================================================
+    # kubernetes 패키지 완전 제거
+    # =====================================================
+    - name: unhold kubernetes packages
+      shell: |
+        apt-mark unhold kubelet kubeadm kubectl 2>/dev/null || true
+      ignore_errors: yes
+
+    - name: remove kubernetes packages
+      shell: |
+        apt remove -y --allow-change-held-packages kubelet kubeadm kubectl kubernetes-cni || true
+        apt purge -y --allow-change-held-packages kubelet kubeadm kubectl kubernetes-cni || true
+      ignore_errors: yes
+
+    - name: remove kubernetes apt repo
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/apt/sources.list.d/kubernetes.list
+        - /etc/apt/keyrings/kubernetes.gpg
+        - /tmp/kubernetes.key
+      ignore_errors: yes
+
+    - name: apt autoremove
+      apt:
+        autoremove: yes
+        purge: yes
+      ignore_errors: yes
+
+    # =====================================================
+    # containerd 재시작 (깨끗한 상태로)
+    # =====================================================
+    - name: restart containerd
+      service:
+        name: containerd
+        state: restarted
+        enabled: yes
+      ignore_errors: yes
+
+    # =====================================================
+    # etcd 디스크 완전 포맷 (재설치 시 클린 슬레이트)
+    # =====================================================
+    - name: Unmount etcd disk before format
+      shell: umount /var/lib/etcd 2>/dev/null || true
+      when: inventory_hostname in groups['control_plane']
+
+    - name: Format etcd disk fresh for clean reinstall
+      command: mkfs.ext4 -F /dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi1
+      when: inventory_hostname in groups['control_plane']
+      # ignore_errors 제거 → 포맷 실패 시 명확하게 에러 표시
+
+    - name: Mount etcd disk temporarily to remove lost+found
+      shell: |
+        mount /dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi1 /var/lib/etcd 2>/dev/null || true
+        rm -rf /var/lib/etcd/lost+found
+        umount /var/lib/etcd 2>/dev/null || true
+      when: inventory_hostname in groups['control_plane']
+      ignore_errors: yes
+
+    # =====================================================
+    # 모든 Linux 브릿지 및 가상 인터페이스 정리
+    # =====================================================
+    - name: Remove all Linux bridges and virtual interfaces
+      shell: |
+        for br in $(ip link show | grep -E '^\d+: br' | awk '{print $2}' | sed 's/:$//'); do
+          ip link delete "$br" 2>/dev/null || true
+        done
+        for veth in $(ip link show | grep veth | awk '{print $2}' | sed 's/:$//'); do
+          ip link delete "$veth" 2>/dev/null || true
+        done
+      ignore_errors: yes
+
+    # =====================================================
+    # [수정] 라우팅 테이블 초기화 - Calico 경로만 삭제
+    # 기존: ip route flush table main/local/default
+    #       → 기본 게이트웨이까지 삭제되어 SSH 연결 끊김 위험
+    # 수정: Calico(bird 프로토콜)가 추가한 경로만 삭제
+    # =====================================================
+    - name: Flush Calico routing entries only
+      shell: |
+        ip route flush proto bird 2>/dev/null || true
+      ignore_errors: yes
+
+    # =====================================================
+    # 모든 iptables 규칙 초기화 및 기본 정책 설정
+    # =====================================================
+    - name: Reset iptables policies to ACCEPT
+      shell: |
+        for table in filter nat mangle raw security; do
+          iptables -t "$table" -P INPUT ACCEPT 2>/dev/null || true
+          iptables -t "$table" -P FORWARD ACCEPT 2>/dev/null || true
+          iptables -t "$table" -P OUTPUT ACCEPT 2>/dev/null || true
+        done
+      ignore_errors: yes
+
+    - name: Flush and delete all iptables rules
+      shell: |
+        for table in filter nat mangle raw security; do
+          iptables -t "$table" -F 2>/dev/null || true
+          iptables -t "$table" -X 2>/dev/null || true
+        done
+      ignore_errors: yes
+
+    # =====================================================
+    # IPVS 정리
+    # =====================================================
+    - name: Clear IPVS state completely
+      shell: |
+        ipvsadm --clear 2>/dev/null || true
+        ipvsadm --delete-service --all 2>/dev/null || true
+      ignore_errors: yes
+
+    # =====================================================
+    # 임시 파일 및 로그 정리
+    # =====================================================
+    - name: Clean temporary files and logs
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /tmp/calico.yaml
+        - /tmp/kubernetes.key
+        - /var/log/pods
+      ignore_errors: yes
