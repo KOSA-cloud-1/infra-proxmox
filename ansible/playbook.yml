@@ -1,8 +1,10 @@
-- import_playbook: playbook/00_cp1-init.yml
-- import_playbook: playbook/01_pre.yml
-- import_playbook: playbook/02_setup.yml
-- import_playbook: playbook/03_init.yml
-- import_playbook: playbook/04_join.yml
+- import_playbook: playbook/00_prepare_etcd_disk.yml # etcd 디스크 마운트 (CP만)
+- import_playbook: playbook/01_hostname.yml          # hostname 설정 (전체 노드)
+- import_playbook: playbook/02_precheck.yml          # apt 사전 작업 (전체 노드)
+- import_playbook: playbook/03_common.yml            # k8s 공통 패키지 설치
+- import_playbook: playbook/04_cp_init.yml           # kubeadm init + kube-vip
+- import_playbook: playbook/05_join.yml              # CP/Worker 노드 join
+- import_playbook: playbook/06_install_calico.yml    # Calico CNI 설치
 
 # 실행
 # ansible-playbook playbook.yml
