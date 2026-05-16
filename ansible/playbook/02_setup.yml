@@ -20,7 +20,6 @@
           - gpg
         state: present
         update_cache: yes
-        lock_timeout: 300
       register: apt_result
       retries: 5
       delay: 10
@@ -73,7 +72,10 @@
           - containerd
         state: present
         update_cache: yes
-        lock_timeout: 300
+      register: containerd_apt_result
+      retries: 5
+      delay: 10
+      until: containerd_apt_result is succeeded
 
     - name: Create containerd config directory
       file:
@@ -132,7 +134,10 @@
     - name: Update apt cache
       apt:
         update_cache: yes
-        lock_timeout: 300
+      register: kubernetes_repo_apt_result
+      retries: 5
+      delay: 10
+      until: kubernetes_repo_apt_result is succeeded
 
     - name: Set kube version
       set_fact:
@@ -145,7 +150,10 @@
           - "kubeadm={{ kube_version }}"
           - "kubectl={{ kube_version }}"
         state: present
-        lock_timeout: 300
+      register: kubernetes_packages_apt_result
+      retries: 5
+      delay: 10
+      until: kubernetes_packages_apt_result is succeeded
 
     - name: Enable kubelet service
       service:
