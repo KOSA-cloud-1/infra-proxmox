@@ -7,24 +7,26 @@
 
   tasks:
 
-    # =====================================================
-    # collect node list (optional safety)
-    # =====================================================
+    - name: check admin.conf exists
+      stat:
+        path: /etc/kubernetes/admin.conf
+      register: admin_conf
+
     - name: get all nodes except cp1
       shell: |
         kubectl --kubeconfig=/etc/kubernetes/admin.conf get nodes -o name | cut -d'/' -f2 | grep -v cp1
       register: node_list
       ignore_errors: yes
+      failed_when: false
+      when: admin_conf.stat.exists
 
     - name: delete nodes from cluster
       shell: |
         kubectl --kubeconfig=/etc/kubernetes/admin.conf delete node {{ item }} --ignore-not-found
       loop: "{{ node_list.stdout_lines | default([]) }}"
       ignore_errors: yes
+      when: admin_conf.stat.exists and node_list.stdout_lines | default([]) | length > 0
 
-    # =====================================================
-    # remove kube-vip (optional)
-    # =====================================================
     - name: remove kube-vip manifest
       file:
         path: /etc/kubernetes/manifests/kube-vip.yaml
@@ -33,7 +35,7 @@
 
 
 # =========================================================
-# STEP 2 - RESET ALL NODES (cp + workers)
+# STEP 2 - RESET ALL NODES (패키지는 유지)
 # =========================================================
 - name: STEP 2 - Reset ALL nodes (cp + workers)
   hosts: control_plane:workers
@@ -41,9 +43,6 @@
 
   tasks:
 
-    # =====================================================
-    # stop kubelet
-    # =====================================================
     - name: stop kubelet
       service:
         name: kubelet
@@ -51,11 +50,20 @@
         enabled: no
       ignore_errors: yes
 
-    # =====================================================
-    # kubeadm reset
-    # =====================================================
+    - name: Stop all running containers via crictl
+      shell: |
+        crictl ps -q 2>/dev/null | xargs -r crictl stop --timeout 5 || true
+      ignore_errors: yes
+
     - name: kubeadm reset
       command: timeout 60s kubeadm reset -f
+      ignore_errors: yes
+
+    - name: Kill K8s control plane processes
+      shell: |
+        for name in kube-apiserver kube-controller-manager kube-scheduler etcd; do
+          pkill -x "$name" 2>/dev/null || true
+        done
       ignore_errors: yes
 
     - name: stop container runtime after reset
@@ -67,9 +75,53 @@
         - containerd
       ignore_errors: yes
 
+    - name: Kill orphaned containerd shim processes
+      shell: |
+        ps -eo pid=,comm=,args= | awk '$2 == "containerd-shim-runc-v2" && $0 ~ /-namespace k8s.io/ {print $1}' | xargs -r kill -9 2>/dev/null || true
+      ignore_errors: yes
+
     - name: unmount kubelet pod mounts
       shell: |
         grep /var/lib/kubelet /proc/self/mountinfo | awk '{print $5}' | sort -r | xargs -r umount -lf
+      ignore_errors: yes
+
+    # CP 노드만 etcd 디스크가 마운트되어 있음
+    - name: Clear etcd data directory contents before unmounting
+      shell: find /var/lib/etcd -mindepth 1 -delete 2>/dev/null || true
+      when: inventory_hostname in groups['control_plane']
+      ignore_errors: yes
+
+    - name: unmount etcd disk
+      mount:
+        path: /var/lib/etcd
+        state: unmounted
+      ignore_errors: yes
+      when: inventory_hostname in groups['control_plane']
+
+    - name: remove etcd from fstab
+      mount:
+        path: /var/lib/etcd
+        state: absent
+      ignore_errors: yes
+      when: inventory_hostname in groups['control_plane']
+
+    # =====================================================
+    - name: Unmount etcd disk before format
+      shell: umount {{ etcd_mount }} 2>/dev/null || true
+      when: inventory_hostname in groups['control_plane']
+      ignore_errors: yes
+
+    - name: Format etcd disk
+      command: mkfs.ext4 -F {{ etcd_disk }}
+      when: inventory_hostname in groups['control_plane']
+      ignore_errors: yes
+
+    - name: Mount etcd disk temporarily to remove lost+found
+      shell: |
+        mount {{ etcd_disk }} {{ etcd_mount }} 2>/dev/null || true
+        rm -rf {{ etcd_mount }}/lost+found
+        umount {{ etcd_mount }} 2>/dev/null || true
+      when: inventory_hostname in groups['control_plane']
       ignore_errors: yes
 
     # =====================================================
@@ -88,6 +140,7 @@
         - /var/lib/cni
         - /root/.kube
         - /home/kosa/.kube
+        - /tmp/calico.yaml
       ignore_errors: yes
 
     # =====================================================
@@ -95,10 +148,11 @@
     # =====================================================
     - name: delete network interfaces
       shell: |
-        ip link delete cni0 || true
-        ip link delete flannel.1 || true
-        ip link delete cali0 || true
-        ip link delete tunl0 || true
+        ip link delete cni0 2>/dev/null || true
+        ip link delete flannel.1 2>/dev/null || true
+        ip link delete tunl0 2>/dev/null || true
+        ip link delete vxlan.calico 2>/dev/null || true
+        ip link delete cali0 2>/dev/null || true
       ignore_errors: yes
 
     # =====================================================
@@ -110,13 +164,15 @@
         iptables -t nat -F
         iptables -t mangle -F
         iptables -X
+        ipvsadm --clear 2>/dev/null || true
       ignore_errors: yes
 
     # =====================================================
-    # cleanup containerd state
+    # containerd 재시작 (깨끗한 상태로, 패키지는 유지)
     # =====================================================
-    - name: cleanup containerd state
-      file:
-        path: /var/lib/containerd
-        state: absent
+    - name: restart containerd
+      service:
+        name: containerd
+        state: restarted
+        enabled: yes
       ignore_errors: yes

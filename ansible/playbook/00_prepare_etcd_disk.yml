@@ -1,0 +1,73 @@
+- name: Prepare local disk for etcd
+  hosts: cp1,cp2,cp3
+  become: true
+
+  tasks:
+    # =====================================================
+    # etcd 전용 로컬 디스크 존재 여부 확인
+    # - control-plane 노드에 추가한 local disk가 실제로 인식되는지 확인
+    # - /dev/disk/by-id 경로를 사용해 디스크 이름 변경 문제를 줄임
+    # =====================================================
+    - name: Check etcd disk exists
+      stat:
+        path: "{{ etcd_disk }}"
+      register: etcd_disk_stat
+
+    # =====================================================
+    # etcd 디스크가 없으면 즉시 실패 처리
+    # - 디스크가 없는 상태에서 계속 진행하면 OS 디스크에 마운트/포맷 작업이 잘못 적용될 수 있음
+    # - VM에 local disk가 제대로 추가되었는지 확인하도록 중단
+    # =====================================================
+    - name: Fail if etcd disk does not exist
+      fail:
+        msg: "etcd disk {{ etcd_disk }} does not exist. Check VM local disk attachment."
+      when: not etcd_disk_stat.stat.exists
+
+    # =====================================================
+    # etcd 디스크에 ext4 파일시스템 생성
+    # - etcd data directory로 사용할 디스크를 ext4로 준비
+    # - force_format_etcd_disk=true일 때만 강제 포맷
+    # - 기존 데이터가 있는 디스크를 실수로 포맷하지 않도록 기본값은 false
+    # =====================================================
+    - name: Ensure ext4 filesystem on etcd disk
+      filesystem:
+        fstype: ext4
+        dev: "{{ etcd_disk }}"
+        force: "{{ force_format_etcd_disk | default(false) | bool }}"
+
+    # =====================================================
+    # etcd 디스크 UUID 조회
+    # - /etc/fstab에는 /dev/sdb 같은 장치명보다 UUID 사용이 안전함
+    # - 재부팅 후 디스크 이름이 바뀌어도 동일 디스크를 마운트할 수 있음
+    # =====================================================
+    - name: Get etcd disk UUID
+      command: blkid -s UUID -o value {{ etcd_disk }}
+      register: etcd_disk_uuid
+      changed_when: false
+
+    # =====================================================
+    # etcd 데이터 디렉터리 생성
+    # - kubeadm local etcd의 기본 data directory는 /var/lib/etcd
+    # - 이 경로를 local disk mount point로 사용
+    # =====================================================
+    - name: Create etcd data directory
+      file:
+        path: "{{ etcd_mount }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    # =====================================================
+    # local disk를 /var/lib/etcd에 마운트
+    # - etcd 데이터를 Ceph RBD가 아닌 local disk에 저장하기 위한 작업
+    # - state: mounted로 현재 마운트와 /etc/fstab 등록을 함께 처리
+    # - noatime 옵션으로 불필요한 access time 갱신을 줄임
+    # =====================================================
+    - name: Mount local disk to /var/lib/etcd
+      mount:
+        path: "{{ etcd_mount }}"
+        src: "UUID={{ etcd_disk_uuid.stdout }}"
+        fstype: ext4
+        opts: defaults,noatime
+        state: mounted
