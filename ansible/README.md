@@ -16,7 +16,7 @@ Proxmox VM 위에 kubeadm 기반 Kubernetes 클러스터를 구성하기 위한 
 | Ansible SSH | 관리망 `172.17.128.0/22` | 작업 PC 또는 Ansible VM이 접속하는 주소 |
 | Kubernetes API VIP | 관리망 `172.17.128.30` | 외부 `kubectl` 접근용 API endpoint |
 | Kubernetes node IP | 10G망 `10.10.10.0/24` | kubelet node IP, control-plane advertise, Calico node IP |
-| Pod CIDR | `172.20.0.0/16` | Kubernetes Pod 대역 |
+| Pod CIDR | `10.244.0.0/16` | Kubernetes Pod 대역 |
 
 API VIP는 관리망에 있고, 노드 간 Kubernetes/Calico 통신은 `node_ip`로 지정한 10G망을 사용합니다.
 
