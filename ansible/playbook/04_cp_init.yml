@@ -18,6 +18,10 @@
       command: crictl pull ghcr.io/kube-vip/kube-vip:{{ kube_vip_version }}
       changed_when: false
 
+    # cp2, cp3는 init 전에 manifests에 배치 (join 전 kube-vip 참여 필요)
+    # cp1은 kubeadm init 중 kube-vip가 static pod로 떠서 leader election을
+    # 시도하면 bootstrap VIP를 건드려 API server 기동에 실패하므로
+    # init 완료 후 RBAC 적용 단계에서 manifest를 배치함
     - name: Generate kube-vip manifest
       shell: |
         ctr -n k8s.io run --rm --net-host ghcr.io/kube-vip/kube-vip:{{ kube_vip_version }} vip /kube-vip manifest pod \
@@ -34,6 +38,24 @@
       args:
         executable: /bin/bash
         creates: /etc/kubernetes/manifests/kube-vip.yaml
+      when: inventory_hostname != 'cp1'
+
+    - name: Pre-generate kube-vip manifest for cp1 to temp location
+      shell: |
+        ctr -n k8s.io run --rm --net-host ghcr.io/kube-vip/kube-vip:{{ kube_vip_version }} vip /kube-vip manifest pod \
+          --interface {{ vip_interface }} \
+          --address {{ vip_address }} \
+          --vipSubnet /{{ vip_cidr | default(32) }} \
+          --controlplane \
+          --arp \
+          --leaderElection \
+          --leaseDuration 15 \
+          --leaseRenewDuration 10 \
+          --leaseRetry 2 \
+        > /tmp/kube-vip-manifest.yaml
+      args:
+        executable: /bin/bash
+      when: inventory_hostname == 'cp1'
 
 
 - name: Initialize Kubernetes Cluster
@@ -271,19 +293,24 @@
         executable: /bin/bash
 
     # =====================================================
-    # kube-vip 재시작
-    # - RBAC 적용 후 kube-vip가 leases를 사용할 수 있도록 재시작
+    # kube-vip manifest 배치 및 기동 대기
+    # - RBAC 적용 후 manifest를 배치해야 leader election이 정상 동작
+    # - init 전에 배치하면 kube-vip가 API server 없이 leader election을
+    #   시도하다가 bootstrap VIP를 건드려 API server 기동 실패
     # =====================================================
-    - name: Restart kube-vip after RBAC is ready
-      shell: |
-        crictl ps -a --name kube-vip -q | xargs -r crictl stop || true
-        crictl ps -a --name kube-vip -q | xargs -r crictl rm || true
-      args:
-        executable: /bin/bash
+    - name: Install kube-vip manifest after RBAC is ready
+      copy:
+        src: /tmp/kube-vip-manifest.yaml
+        dest: /etc/kubernetes/manifests/kube-vip.yaml
+        remote_src: yes
 
-    - name: Wait for kube-vip to restart
-      pause:
-        seconds: 20
+    - name: Wait for kube-vip to start
+      shell: crictl ps --name kube-vip -q
+      register: kube_vip_running
+      retries: 30
+      delay: 5
+      until: kube_vip_running.stdout | length > 0
+      changed_when: false
 
     # =====================================================
     # bootstrap VIP 제거 후 kube-vip가 VIP를 인계했는지 확인

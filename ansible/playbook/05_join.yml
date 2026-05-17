@@ -127,6 +127,15 @@
       changed_when: false
       when: not control_plane_complete
 
+    - name: Wait for VIP to be reachable before joining
+      shell: curl -sk --connect-timeout 3 https://{{ vip_address }}:6443/healthz
+      register: vip_reachable
+      retries: 40
+      delay: 5
+      until: vip_reachable.rc == 0
+      changed_when: false
+      when: not control_plane_complete
+
     - name: Join control plane
       shell: >
         {{ hostvars['cp1']['worker_join_cmd'] }}

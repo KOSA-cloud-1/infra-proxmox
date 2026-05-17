@@ -15,4 +15,4 @@ etcd_disk: /dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi1
 etcd_disk_mount: /mnt/etcd
 etcd_mount: /var/lib/etcd
 
-hide_join_secrets: true
+hide_join_secrets: false

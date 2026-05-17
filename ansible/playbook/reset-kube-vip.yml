@@ -133,6 +133,11 @@
         path: /root/.kube
         state: absent
 
+    - name: Remove pre-generated kube-vip manifest temp file
+      file:
+        path: /tmp/kube-vip-manifest.yaml
+        state: absent
+
     # =====================================================
     # 남아 있는 control-plane 프로세스 종료 확인용
     # - kubeadm reset 후에도 static pod 프로세스가 잠깐 남을 수 있음
