@@ -34,6 +34,7 @@ resource "proxmox_virtual_environment_vm" "cp" {
 
     memory {
         dedicated = each.value.memory
+ 	    floating  = each.value.balloon
     }
 
     # =========================================================
