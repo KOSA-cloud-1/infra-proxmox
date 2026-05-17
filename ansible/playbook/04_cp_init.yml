@@ -96,12 +96,12 @@
     # =====================================================
     # /var/lib/etcd 기존 데이터 확인
     # - 재설치 전에 기존 etcd 데이터가 남아 있으면 init 충돌 가능
-    # - lost+found는 ext4 기본 디렉터리이므로 허용
-    # - 그 외 데이터가 있으면 즉시 실패 처리
+    # - /var/lib/etcd는 /mnt/etcd/data의 bind mount이므로
+    #   lost+found가 없음 → 단순하게 전체 내용 확인
     # =====================================================
-    - name: Check existing etcd data except lost+found
+    - name: Check existing etcd data
       shell: |
-        find /var/lib/etcd -mindepth 1 -maxdepth 1 ! -name lost+found
+        find /var/lib/etcd -mindepth 1 -maxdepth 1
       register: existing_etcd_data
       changed_when: false
 
@@ -115,7 +115,7 @@
           {{ existing_etcd_data.stdout }}
 
           Cleanup command:
-            sudo find /var/lib/etcd -mindepth 1 -maxdepth 1 ! -name lost+found -exec rm -rf {} +
+            sudo rm -rf /var/lib/etcd/*
       when: existing_etcd_data.stdout | length > 0
 
     # =====================================================

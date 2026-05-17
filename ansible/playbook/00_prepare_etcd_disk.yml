@@ -46,11 +46,37 @@
       changed_when: false
 
     # =====================================================
-    # etcd 데이터 디렉터리 생성
-    # - kubeadm local etcd의 기본 data directory는 /var/lib/etcd
-    # - 이 경로를 local disk mount point로 사용
+    # etcd 디스크 raw 마운트 포인트 생성 및 마운트
+    # - 디스크를 /var/lib/etcd에 직접 마운트하면 ext4의 lost+found가
+    #   etcd 데이터 디렉터리에 나타나 문제가 발생함
+    # - /mnt/etcd에 디스크를 마운트하고 하위 data/ 서브디렉터리를
+    #   /var/lib/etcd에 bind mount해서 lost+found를 격리
     # =====================================================
-    - name: Create etcd data directory
+    - name: Create etcd disk mount directory
+      file:
+        path: "{{ etcd_disk_mount }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Mount local disk to {{ etcd_disk_mount }}
+      mount:
+        path: "{{ etcd_disk_mount }}"
+        src: "UUID={{ etcd_disk_uuid.stdout }}"
+        fstype: ext4
+        opts: defaults,noatime
+        state: mounted
+
+    - name: Create etcd data subdirectory inside disk mount
+      file:
+        path: "{{ etcd_disk_mount }}/data"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Create etcd data directory for bind mount target
       file:
         path: "{{ etcd_mount }}"
         state: directory
@@ -59,15 +85,13 @@
         mode: '0700'
 
     # =====================================================
-    # local disk를 /var/lib/etcd에 마운트
-    # - etcd 데이터를 Ceph RBD가 아닌 local disk에 저장하기 위한 작업
-    # - state: mounted로 현재 마운트와 /etc/fstab 등록을 함께 처리
-    # - noatime 옵션으로 불필요한 access time 갱신을 줄임
+    # /mnt/etcd/data를 /var/lib/etcd에 bind mount
+    # - etcd는 /var/lib/etcd에서 lost+found 없는 클린 디렉터리를 봄
     # =====================================================
-    - name: Mount local disk to /var/lib/etcd
+    - name: Bind mount etcd data subdirectory to {{ etcd_mount }}
       mount:
         path: "{{ etcd_mount }}"
-        src: "UUID={{ etcd_disk_uuid.stdout }}"
-        fstype: ext4
-        opts: defaults,noatime
+        src: "{{ etcd_disk_mount }}/data"
+        fstype: none
+        opts: bind
         state: mounted
