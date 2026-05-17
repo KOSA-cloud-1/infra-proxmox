@@ -91,16 +91,31 @@
       when: inventory_hostname in groups['control_plane']
       ignore_errors: yes
 
-    - name: unmount etcd disk
+    # bind mount를 먼저 해제한 후 raw disk 마운트 해제
+    - name: Unmount etcd bind mount
       mount:
-        path: /var/lib/etcd
+        path: "{{ etcd_mount }}"
         state: unmounted
       ignore_errors: yes
       when: inventory_hostname in groups['control_plane']
 
-    - name: remove etcd from fstab
+    - name: Remove etcd bind mount from fstab
       mount:
-        path: /var/lib/etcd
+        path: "{{ etcd_mount }}"
+        state: absent
+      ignore_errors: yes
+      when: inventory_hostname in groups['control_plane']
+
+    - name: Unmount etcd disk raw mount
+      mount:
+        path: "{{ etcd_disk_mount }}"
+        state: unmounted
+      ignore_errors: yes
+      when: inventory_hostname in groups['control_plane']
+
+    - name: Remove etcd disk raw mount from fstab
+      mount:
+        path: "{{ etcd_disk_mount }}"
         state: absent
       ignore_errors: yes
       when: inventory_hostname in groups['control_plane']
@@ -116,6 +131,7 @@
         - /etc/kubernetes
         - /var/lib/kubelet
         - /var/lib/etcd
+        - "{{ etcd_disk_mount }}"
         - /var/lib/containerd
         - /etc/cni/net.d
         - /opt/cni
@@ -207,20 +223,25 @@
     # =====================================================
     # etcd 디스크 완전 포맷 (재설치 시 클린 슬레이트)
     # =====================================================
-    - name: Unmount etcd disk before format
-      shell: umount {{ etcd_mount }} 2>/dev/null || true
+    - name: Unmount etcd mounts before format
+      shell: |
+        umount {{ etcd_mount }} 2>/dev/null || true
+        umount {{ etcd_disk_mount }} 2>/dev/null || true
       when: inventory_hostname in groups['control_plane']
 
     - name: Format etcd disk fresh for clean reinstall
       command: mkfs.ext4 -F {{ etcd_disk }}
       when: inventory_hostname in groups['control_plane']
-      # ignore_errors 제거 → 포맷 실패 시 명확하게 에러 표시
 
-    - name: Mount etcd disk temporarily to remove lost+found
+    # 포맷 후 data/ 서브디렉터리 사전 생성
+    # - lost+found는 raw mount point(/mnt/etcd)에만 존재하고
+    #   bind mount 대상인 data/에는 없음
+    - name: Prepare etcd data subdirectory after format
       shell: |
-        mount {{ etcd_disk }} {{ etcd_mount }} 2>/dev/null || true
-        rm -rf {{ etcd_mount }}/lost+found
-        umount {{ etcd_mount }} 2>/dev/null || true
+        mkdir -p {{ etcd_disk_mount }}
+        mount {{ etcd_disk }} {{ etcd_disk_mount }}
+        mkdir -p -m 0700 {{ etcd_disk_mount }}/data
+        umount {{ etcd_disk_mount }}
       when: inventory_hostname in groups['control_plane']
       ignore_errors: yes
 

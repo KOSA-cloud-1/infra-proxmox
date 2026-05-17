@@ -206,9 +206,9 @@
     - name: Install Kubernetes packages
       apt:
         name:
-          - "kubelet={{ kube_version }}"
-          - "kubeadm={{ kube_version }}"
-          - "kubectl={{ kube_version }}"
+          - "kubelet={{ kubernetes_apt_version }}"
+          - "kubeadm={{ kubernetes_apt_version }}"
+          - "kubectl={{ kubernetes_apt_version }}"
         state: present
       register: kubernetes_packages_apt_result
       retries: 5
