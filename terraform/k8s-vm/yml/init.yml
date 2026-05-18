@@ -1,4 +1,4 @@
-# clound template 에 qemu-guest-agent가 설치되어있음.
+# cloud template 에 qemu-guest-agent가 설치되어있음.
 # machine-id 지워진 상태이므로 VM이 생성될 때 machine-id 가 생성됨.
 #cloud-config
 runcmd:

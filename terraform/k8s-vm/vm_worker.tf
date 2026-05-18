@@ -1,176 +1,102 @@
 resource "proxmox_virtual_environment_vm" "worker" {
-    for_each = var.worker_nodes
+  for_each = var.worker_nodes
 
+  name      = each.key
+  vm_id     = each.value.id
+  node_name = each.value.node
+  started   = true
 
-    # =========================================================
-    # 기본 VM 정보
-    # =========================================================
-    name      = each.key
-    vm_id = each.value.id
-    node_name = each.value.node
+  machine = "q35"
+  bios    = "ovmf"
 
-    # =========================================================
-    # Machine Type
-    # =========================================================
-    machine = "q35"                          # ← 추가
+  efi_disk {
+    datastore_id = var.vm_datastore_id
+    file_format  = "raw"
+    type         = "4m"
+  }
 
-    # =========================================================
-    # OVMF (UEFI) 설정
-    # =========================================================
-    efi_disk {                               # ← 추가
-        datastore_id      = "ceph-rbd"
-        file_format       = "raw"
-        type              = "4m"
+  agent {
+    enabled = true
+  }
+
+  cpu {
+    cores = each.value.cpu
+    type  = "host"
+  }
+
+  memory {
+    dedicated = each.value.memory
+    floating  = each.value.balloon
+  }
+
+  operating_system {
+    type = "l26"
+  }
+
+  scsi_hardware = "virtio-scsi-single"
+  boot_order    = ["scsi0"]
+
+  disk {
+    datastore_id = var.vm_datastore_id
+    interface    = "scsi0"
+    size         = 20
+    discard      = "on"
+    iothread     = true
+    ssd          = true
+  }
+
+  # net0: 관리망 (vmbr0, VLAN40, 1G)
+  network_device {
+    bridge  = var.mgmt_bridge
+    model   = "virtio"
+    vlan_id = var.mgmt_vlan_id
+  }
+
+  # net1: Kubernetes 내부망 (vmbr1, 10G)
+  network_device {
+    bridge = var.internal_bridge
+    model  = "virtio"
+  }
+
+  vga {
+    type = "std"
+  }
+
+  clone {
+    node_name = var.template_node_name
+    vm_id     = var.template_vm_id
+    full      = true
+  }
+
+  initialization {
+    ip_config {
+      ipv4 {
+        address = "${each.value.ip1g}/${var.mgmt_prefix_length}"
+        gateway = var.gateway
+      }
     }
 
-    bios = "ovmf"   
-
-    # =========================================================
-    # CPU / Memory
-    # =========================================================
-    cpu {
-        cores = each.value.cpu
-        type  = "host"
+    ip_config {
+      ipv4 {
+        address = "${each.value.ip10g}/${var.internal_prefix_length}"
+      }
     }
 
-    memory {
-        dedicated = each.value.memory
-	    floating  = each.value.balloon 
-   }
-
-    # =========================================================
-    # QEMU Guest Agent
-    # =========================================================
-    agent {
-        enabled = true
+    dns {
+      servers = [var.gateway, "8.8.8.8"]
     }
 
-    # =========================================================
-    # 운영체제 설정
-    # =========================================================
-    operating_system {
-        type = "l26"
+    user_account {
+      keys = [var.ssh_public_key]
     }
 
-    # =========================================================
-    # 부팅 및 SCSI 설정
-    # =========================================================
-    scsi_hardware = "virtio-scsi-single"
+    user_data_file_id = "local:snippets/init-${each.key}.yml"
+  }
 
-    boot_order = ["scsi0"]
-
-    # =========================================================
-    # 디스크 설정
-    # =========================================================
-    disk {
-        datastore_id = "ceph-rbd"
-        interface    = "scsi0"
-        size         = 20
-
-        # Ceph + Kubernetes면 권장
-        discard      = "on"
-        iothread     = true
-        ssd          = true
-    }
-
-
-    # =========================================================
-    # 네트워크 인터페이스
-    # =========================================================
-
-    # ---------------------------------------------------------
-    # net0 → vmbr0
-    # 관리망 (1G)
-    # ---------------------------------------------------------
-    network_device {
-        bridge   = "vmbr0"
-        model    = "virtio"
-        vlan_id  = 40
-    }
-
-    # ---------------------------------------------------------
-    # net1 → vmbr1
-    # Kubernetes 내부망 (10G)
-    # ---------------------------------------------------------
-    network_device {
-        bridge = "vmbr1"
-        model  = "virtio"
-    }
-
-    # =========================================================
-    # VGA
-    # =========================================================
-    vga {
-        type = "std"
-    }
-
-    # =========================================================
-    # Template Clone
-    # =========================================================
-    clone {
-        # Template VM 이 존재하는 노드
-        node_name = "team14"
-
-        # Template VM ID
-        vm_id = var.template_vm_id
-
-        # Full Clone 사용
-        full = true
-    }
-
-    # =========================================================
-    # Cloud-Init 설정
-    # =========================================================
-    initialization {
-
-        # -------------------------------------------------------
-        # net0 (vmbr0)
-        # 관리망 / 1G / DHCP
-        # -------------------------------------------------------
-        ip_config {
-        ipv4 {
-            address = "${each.value.ip1g}/22"
-            gateway = var.gateway
-        }
-        }
-        dns {
-        servers = [var.gateway, "8.8.8.8"]
-        }
-
-
-        # -------------------------------------------------------
-        # net1 (vmbr1)
-        # Kubernetes 내부망 / 10G / Static IP
-        # -------------------------------------------------------
-        ip_config {
-            ipv4 {
-                address = "${each.value.ip10g}/24"
-            }
-        }
-
-        # -------------------------------------------------------
-        # VM 계정 설정
-        # -------------------------------------------------------
-        user_account {
-            keys     = [var.ssh_public_key]
-        }
-
-        # -------------------------------------------------------
-        # Cloud-Init User Data
-        # -------------------------------------------------------
-        user_data_file_id = "local:snippets/init-${each.key}.yml"
-    }
-
-
-    # =========================================================
-    # Terraform Lifecycle
-    # =========================================================
-    lifecycle {
-        ignore_changes = [
-        network_device,
-        disk
-        ]
-    }
-
-
+  lifecycle {
+    ignore_changes = [
+      network_device,
+      disk,
+    ]
+  }
 }
