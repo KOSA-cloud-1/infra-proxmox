@@ -54,6 +54,7 @@ write_files:
         virtual_router_id ${virtual_router_id}    # 동일 L2에서 유일해야 함
         priority ${keepalived_priority}           # 높을수록 MASTER 우선권 (haproxy-1: 110, haproxy-2: 100)
         advert_int 1                              # VRRP 광고 주기 (1초)
+        preempt_delay 30                          # 복구 후 30초 대기 후 MASTER 탈취
         unicast_src_ip ${keepalived_unicast_src}  # 이 VM 자신의 IP
 %{ if length(keepalived_peers) > 0 ~}
         unicast_peer {   # 멀티캐스트 대신 유니캐스트로 VRRP 전송 (VLAN 환경에서 권장)
@@ -78,6 +79,5 @@ write_files:
 runcmd:
   - sysctl --system                             # nonlocal_bind 커널 파라미터 적용
   - systemctl enable haproxy keepalived         # 재부팅 시 자동 시작 등록
-  - haproxy -c -f /etc/haproxy/haproxy.cfg     # HAProxy 설정 파일 문법 검증
-  - systemctl restart haproxy
+  - sh -c "haproxy -c -f /etc/haproxy/haproxy.cfg && systemctl restart haproxy"
   - systemctl restart keepalived
