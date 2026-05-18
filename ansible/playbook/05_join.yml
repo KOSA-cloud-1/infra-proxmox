@@ -82,11 +82,31 @@
         path: /etc/kubernetes/manifests/etcd.yaml
       register: control_plane_etcd_manifest
 
+    - name: Check this node is a full voting etcd member
+      shell: |
+        eid=$(crictl ps --name etcd -q | head -n1)
+        if [ -z "$eid" ]; then exit 1; fi
+        crictl exec "$eid" etcdctl \
+          --endpoints=https://127.0.0.1:2379 \
+          --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+          --cert=/etc/kubernetes/pki/etcd/server.crt \
+          --key=/etc/kubernetes/pki/etcd/server.key \
+          member list | grep "{{ node_ip | default(ansible_host) }}" | grep -v ", true$"
+      delegate_to: cp1
+      register: etcd_voting_check
+      failed_when: false
+      changed_when: false
+
     - name: Set control-plane completion fact
       set_fact:
-        control_plane_complete: "{{ control_plane_admin_conf.stat.exists and control_plane_etcd_manifest.stat.exists }}"
+        control_plane_complete: >-
+          {{
+            control_plane_admin_conf.stat.exists and
+            control_plane_etcd_manifest.stat.exists and
+            etcd_voting_check.rc == 0
+          }}
 
-    - name: Remove stale etcd member for partial control-plane join
+    - name: Remove stale etcd member before joining
       shell: |
         eid=$(crictl ps --name etcd -q | head -n1)
         mid=$(crictl exec "$eid" etcdctl \
@@ -104,9 +124,9 @@
             member remove "$mid"
         fi
       delegate_to: cp1
-      when: control_plane_admin_conf.stat.exists and not control_plane_etcd_manifest.stat.exists
+      when: not control_plane_complete
 
-    - name: Reset partial control-plane join state
+    - name: Reset control-plane join state
       shell: |
         systemctl stop kubelet || true
         kubeadm reset -f || true
@@ -120,7 +140,24 @@
         ip link delete tunl0 2>/dev/null || true
         ip route flush proto bird 2>/dev/null || true
         systemctl restart containerd
-      when: control_plane_admin_conf.stat.exists and not control_plane_etcd_manifest.stat.exists
+      when: not control_plane_complete
+
+    - name: Wait for cp1 etcd to be healthy before joining
+      shell: |
+        eid=$(crictl ps --name etcd -q | head -n1)
+        crictl exec "$eid" etcdctl \
+          --endpoints=https://127.0.0.1:2379 \
+          --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+          --cert=/etc/kubernetes/pki/etcd/server.crt \
+          --key=/etc/kubernetes/pki/etcd/server.key \
+          endpoint health
+      delegate_to: cp1
+      register: etcd_health
+      retries: 12
+      delay: 5
+      until: etcd_health.rc == 0
+      changed_when: false
+      when: not control_plane_complete
 
     - name: Pull control-plane images
       command: kubeadm config images pull --kubernetes-version v{{ kube_version }}
@@ -128,7 +165,7 @@
       when: not control_plane_complete
 
     - name: Wait for VIP to be reachable before joining
-      shell: curl -sk --connect-timeout 3 https://{{ vip_address }}:6443/healthz
+      shell: curl -sk --connect-timeout 3 https://{{ vip_address }}:6443/readyz
       register: vip_reachable
       retries: 40
       delay: 5
@@ -146,6 +183,46 @@
         creates: /etc/kubernetes/manifests/etcd.yaml
       register: control_plane_join_result
       no_log: "{{ hide_join_secrets | default(true) | bool }}"
+
+    - name: Auto-promote etcd learner to voting member
+      shell: |
+        eid=$(crictl ps --name etcd -q | head -n1)
+        mid=$(crictl exec "$eid" etcdctl \
+          --endpoints=https://127.0.0.1:2379 \
+          --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+          --cert=/etc/kubernetes/pki/etcd/server.crt \
+          --key=/etc/kubernetes/pki/etcd/server.key \
+          member list | awk -F", " '/{{ node_ip | default(ansible_host) }}/ && $NF == "true" {print $1}')
+        if [ -n "$mid" ]; then
+          crictl exec "$eid" etcdctl \
+            --endpoints=https://127.0.0.1:2379 \
+            --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+            --cert=/etc/kubernetes/pki/etcd/server.crt \
+            --key=/etc/kubernetes/pki/etcd/server.key \
+            member promote "$mid"
+        fi
+      delegate_to: cp1
+      register: etcd_promote
+      retries: 24
+      delay: 5
+      until: etcd_promote.rc == 0
+      changed_when: "'promoted' in etcd_promote.stdout"
+
+    - name: Wait for this node's etcd to be healthy after join
+      shell: |
+        eid=$(crictl ps --name etcd -q | head -n1)
+        [ -z "$eid" ] && exit 1
+        crictl exec "$eid" etcdctl \
+          --endpoints=https://127.0.0.1:2379 \
+          --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+          --cert=/etc/kubernetes/pki/etcd/server.crt \
+          --key=/etc/kubernetes/pki/etcd/server.key \
+          endpoint health
+      register: post_join_etcd_health
+      retries: 60
+      delay: 5
+      until: post_join_etcd_health.rc == 0
+      changed_when: false
 
     - name: Setup kubeconfig directory
       file:

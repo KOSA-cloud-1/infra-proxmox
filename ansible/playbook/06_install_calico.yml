@@ -64,7 +64,7 @@
         kubectl --kubeconfig=/etc/kubernetes/admin.conf
         --server=https://{{ node_ip | default(ansible_host) }}:6443
         --request-timeout=10s
-        -n kube-system rollout status daemonset/calico-node --timeout=10m
+        -n kube-system rollout status daemonset/calico-node --timeout=20m
       changed_when: false
 
     # =====================================================
