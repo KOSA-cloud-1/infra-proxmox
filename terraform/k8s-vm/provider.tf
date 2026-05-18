@@ -1,4 +1,3 @@
-# 사용할 프로바이더와 버전 설정
 terraform {
   required_version = ">= 1.15.3, < 1.16.0"
 
@@ -13,28 +12,20 @@ terraform {
 provider "proxmox" {
   endpoint  = var.virtual_environment_endpoint
   api_token = var.virtual_environment_api_token
-  insecure  = true
+  insecure  = var.virtual_environment_insecure
 
   ssh {
-    username    = "root"
-    agent       = false
-    private_key = file(pathexpand("~/.ssh/id_team1_sunmin"))
+    username    = var.proxmox_ssh_username
+    agent       = var.proxmox_ssh_agent
+    private_key = var.proxmox_ssh_agent ? null : file(pathexpand(var.proxmox_ssh_private_key_path))
 
-    node {
-      name    = "team11"
-      address = "192.168.36.151"
-    }
-    node {
-      name    = "team12"
-      address = "192.168.36.152"
-    }
-    node {
-      name    = "team13"
-      address = "192.168.36.153"
-    }
-    node {
-      name    = "team14"
-      address = "192.168.36.154"
+    dynamic "node" {
+      for_each = var.proxmox_ssh_nodes
+
+      content {
+        name    = node.key
+        address = node.value.address
+      }
     }
   }
 }
