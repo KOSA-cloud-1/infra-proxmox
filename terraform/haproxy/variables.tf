@@ -1,3 +1,7 @@
+# =========================================================
+# Proxmox API 접속 정보
+# =========================================================
+
 variable "virtual_environment_endpoint" {
   description = "Proxmox API Endpoint"
   type        = string
@@ -41,20 +45,16 @@ variable "proxmox_ssh_nodes" {
   }))
 
   default = {
-    team11 = {
-      address = "192.168.36.151"
-    }
-    team12 = {
-      address = "192.168.36.152"
-    }
-    team13 = {
-      address = "192.168.36.153"
-    }
-    team14 = {
-      address = "192.168.36.154"
-    }
+    team11 = { address = "192.168.36.151" }
+    team12 = { address = "192.168.36.152" }
+    team13 = { address = "192.168.36.153" }
+    team14 = { address = "192.168.36.154" }
   }
 }
+
+# =========================================================
+# Template 정보
+# =========================================================
 
 variable "template_vm_id" {
   description = "Clone에 사용할 Template VM ID"
@@ -66,6 +66,20 @@ variable "template_node_name" {
   type        = string
   default     = "team14"
 }
+
+# =========================================================
+# SSH 설정
+# =========================================================
+
+variable "ssh_public_key" {
+  description = "HAProxy VM에 주입할 SSH 공개 키"
+  type        = string
+  sensitive   = true
+}
+
+# =========================================================
+# Storage
+# =========================================================
 
 variable "vm_datastore_id" {
   description = "HAProxy VM 디스크 datastore"
@@ -79,11 +93,9 @@ variable "snippet_datastore_id" {
   default     = "local"
 }
 
-variable "ssh_public_key" {
-  description = "HAProxy VM에 주입할 SSH 공개 키"
-  type        = string
-  sensitive   = true
-}
+# =========================================================
+# 네트워크 설정
+# =========================================================
 
 variable "dmz_bridge" {
   description = "DMZ VLAN이 연결된 Proxmox bridge (1G, vmbr0)"
@@ -95,6 +107,11 @@ variable "dmz_vlan_id" {
   description = "On-Prem HAProxy가 위치할 DMZ VLAN ID"
   type        = number
   default     = 20
+
+  validation {
+    condition     = var.dmz_vlan_id >= 1 && var.dmz_vlan_id <= 4094
+    error_message = "dmz_vlan_id는 유효한 VLAN 범위인 1-4094 사이여야 합니다."
+  }
 }
 
 variable "dmz_prefix_length" {
@@ -108,6 +125,10 @@ variable "dmz_gateway" {
   type        = string
   default     = "172.17.32.1"
 }
+
+# =========================================================
+# HAProxy VM 구성
+# =========================================================
 
 variable "haproxy_vip" {
   description = "VLAN20 DMZ에서 keepalived가 제공할 On-Prem HAProxy VIP"
@@ -146,6 +167,10 @@ variable "haproxy_maxconn" {
   default     = 4096
 }
 
+# =========================================================
+# Keepalived 설정
+# =========================================================
+
 variable "keepalived_interface" {
   description = "VRRP VIP를 올릴 VM 내부 NIC 이름"
   type        = string
@@ -162,6 +187,11 @@ variable "keepalived_virtual_router_id" {
   description = "VRRP virtual_router_id. 동일 L2 구간에서 중복되지 않아야 합니다."
   type        = number
   default     = 20
+
+  validation {
+    condition     = var.keepalived_virtual_router_id >= 1 && var.keepalived_virtual_router_id <= 255
+    error_message = "keepalived_virtual_router_id는 VRRP 규격에 따라 1-255 사이여야 합니다."
+  }
 }
 
 variable "keepalived_auth_pass" {
