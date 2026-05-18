@@ -64,6 +64,7 @@ variable "cp_nodes" {
     ip10g  = string
     cpu    = number
     memory = number
+    balloon = number
   }))
 }
 
@@ -75,6 +76,7 @@ variable "worker_nodes" {
     ip10g  = string
     cpu    = number
     memory = number
+    balloon = number
   }))
 }
 

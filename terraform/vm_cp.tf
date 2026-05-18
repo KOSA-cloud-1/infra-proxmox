@@ -133,7 +133,7 @@ resource "proxmox_virtual_environment_vm" "cp" {
         # -------------------------------------------------------
         ip_config {
         ipv4 {
-            address = "${each.value.ip1g}/24"
+            address = "${each.value.ip1g}/22"
             gateway = var.gateway
         }
         }
