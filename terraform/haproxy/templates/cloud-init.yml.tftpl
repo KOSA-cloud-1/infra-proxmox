@@ -9,6 +9,7 @@ package_upgrade: false
 packages:
   - haproxy
   - keepalived
+  - qemu-guest-agent
 
 write_files:
   # keepalived VIP를 로컬 NIC에 바인딩하기 위한 커널 파라미터
@@ -78,6 +79,7 @@ write_files:
 # VM 부팅 시 순서대로 실행
 runcmd:
   - sysctl --system                             # nonlocal_bind 커널 파라미터 적용
+  - systemctl enable --now qemu-guest-agent     # Proxmox QEMU guest agent 활성화
   - systemctl enable haproxy keepalived         # 재부팅 시 자동 시작 등록
   - sh -c "haproxy -c -f /etc/haproxy/haproxy.cfg && systemctl restart haproxy"
   - systemctl restart keepalived
