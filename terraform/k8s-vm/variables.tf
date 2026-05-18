@@ -112,12 +112,22 @@ variable "mgmt_vlan_id" {
   description = "Kubernetes 관리망 VLAN ID"
   type        = number
   default     = 40
+
+  validation {
+    condition     = var.mgmt_vlan_id >= 1 && var.mgmt_vlan_id <= 4094
+    error_message = "mgmt_vlan_id는 유효한 VLAN 범위인 1-4094 사이여야 합니다."
+  }
 }
 
 variable "mgmt_prefix_length" {
   description = "관리망 서브넷 prefix length"
   type        = number
   default     = 22
+
+  validation {
+    condition     = var.mgmt_prefix_length >= 1 && var.mgmt_prefix_length <= 32
+    error_message = "mgmt_prefix_length는 1-32 사이여야 합니다."
+  }
 }
 
 variable "internal_bridge" {
@@ -130,6 +140,11 @@ variable "internal_prefix_length" {
   description = "Kubernetes 내부망 서브넷 prefix length"
   type        = number
   default     = 24
+
+  validation {
+    condition     = var.internal_prefix_length >= 1 && var.internal_prefix_length <= 32
+    error_message = "internal_prefix_length는 1-32 사이여야 합니다."
+  }
 }
 
 # =========================================================
