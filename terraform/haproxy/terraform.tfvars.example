@@ -30,7 +30,7 @@ dmz_prefix_length = 24
 dmz_gateway       = "172.17.32.1"
 
 haproxy_vip = "172.17.32.200"
-ingress_vip = "172.17.131.200"
+ingress_vip = "172.17.128.240"
 
 # =========================================================
 # On-Prem HAProxy VM 구성

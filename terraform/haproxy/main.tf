@@ -34,6 +34,7 @@ resource "proxmox_virtual_environment_file" "cloud_init" {
         maxconn           = var.haproxy_maxconn
       })
       haproxy_vip            = var.haproxy_vip
+      hostname               = each.key
       keepalived_auth_pass   = var.keepalived_auth_pass
       keepalived_interface   = var.keepalived_interface
       keepalived_peers       = values(local.keepalived_peers[each.key])

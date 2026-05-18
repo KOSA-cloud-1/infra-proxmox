@@ -5,6 +5,9 @@
 package_update: true
 package_upgrade: false
 
+hostname: ${hostname}
+preserve_hostname: false
+
 # HAProxy(로드밸런서)와 keepalived(VIP 이중화) 패키지 설치
 packages:
   - haproxy
