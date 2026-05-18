@@ -1,0 +1,41 @@
+- name: VM precheck
+  hosts: k8s
+  become: true
+
+  tasks:
+    # =====================================================
+    # apt 백그라운드 서비스 중지
+    # =====================================================
+    - name: Stop apt background services
+      systemd:
+        name: "{{ item }}"
+        state: stopped
+      loop:
+        - unattended-upgrades
+        - apt-daily.timer
+        - apt-daily-upgrade.timer
+        - apt-daily.service
+        - apt-daily-upgrade.service
+      ignore_errors: true
+
+    # =====================================================
+    # dpkg 상태 복구
+    # =====================================================
+    - name: Fix interrupted dpkg state
+      command: dpkg --configure -a
+      register: dpkg_result
+      retries: 5
+      delay: 10
+      until: dpkg_result.rc == 0
+      changed_when: false
+
+    # =====================================================
+    # apt 패키지 인덱스 업데이트
+    # =====================================================
+    - name: Safe apt update
+      apt:
+        update_cache: yes
+      register: apt_result
+      retries: 10
+      delay: 10
+      until: apt_result is succeeded
