@@ -95,13 +95,6 @@ resource "proxmox_virtual_environment_vm" "haproxy" {
       }
     }
 
-    # eth1: 내부망 (vmbr1, 10G) - K8s Ingress 방향 포워딩
-    ip_config {
-      ipv4 {
-        address = "${each.value.ip10g}/${var.internal_prefix_length}"
-      }
-    }
-
     dns {
       servers = [var.dmz_gateway, "8.8.8.8"]
     }
@@ -134,12 +127,6 @@ resource "proxmox_virtual_environment_vm" "haproxy" {
     bridge  = var.dmz_bridge
     model   = "virtio"
     vlan_id = var.dmz_vlan_id
-  }
-
-  # eth1: 내부망 (vmbr1, 10G) - K8s Ingress VIP 방향 포워딩
-  network_device {
-    bridge = var.internal_bridge
-    model  = "virtio"
   }
 
   vga {

@@ -10,7 +10,7 @@ output "haproxy_dmz_ips" {
   description = "On-Prem HAProxy DMZ IP 목록"
   value = {
     for k, vm in var.haproxy_instances :
-    k => vm.ip
+    k => vm.ip1g
   }
 }
 
