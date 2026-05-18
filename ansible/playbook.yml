@@ -1,0 +1,133 @@
+# - import_playbook: playbook/00_prepare_etcd_disk.yml # etcd 디스크 마운트 (CP만)
+# - import_playbook: playbook/01_hostname.yml          # hostname 설정 (전체 노드)
+# - import_playbook: playbook/02_precheck.yml          # apt 사전 작업 (전체 노드)
+# - import_playbook: playbook/03_common.yml            # k8s 공통 패키지 설치
+# - import_playbook: playbook/04_cp_init.yml           # kubeadm init + kube-vip
+# - import_playbook: playbook/05_join.yml              # CP/Worker 노드 join
+# - import_playbook: playbook/06_install_calico.yml    # Calico CNI 설치
+
+# # 실행
+# # ansible-playbook playbook.yml
+---
+# =========================================================
+# 00. Prepare ETCD Disk
+# =========================================================
+- import_playbook: playbook/00_prepare_etcd_disk.yml
+
+- name: Verify 00_prepare_etcd_disk completed
+  hosts: localhost
+  gather_facts: false
+
+  tasks:
+    - pause:
+        seconds: 5
+
+    - debug:
+        msg: "✅ 00_prepare_etcd_disk.yml completed"
+
+# =========================================================
+# 01. Hostname Configuration
+# =========================================================
+- import_playbook: playbook/01_hostname.yml
+
+- name: Verify 01_hostname completed
+  hosts: localhost
+  gather_facts: false
+
+  tasks:
+    - pause:
+        seconds: 5
+
+    - debug:
+        msg: "✅ 01_hostname.yml completed"
+
+# =========================================================
+# 02. Precheck
+# =========================================================
+- import_playbook: playbook/02_precheck.yml
+
+- name: Verify 02_precheck completed
+  hosts: localhost
+  gather_facts: false
+
+  tasks:
+    - pause:
+        seconds: 5
+
+    - debug:
+        msg: "✅ 02_precheck.yml completed"
+
+# =========================================================
+# 03. Common Kubernetes Setup
+# =========================================================
+- import_playbook: playbook/03_common.yml
+
+- name: Verify 03_common completed
+  hosts: localhost
+  gather_facts: false
+
+  tasks:
+    - pause:
+        seconds: 5
+
+    - debug:
+        msg: "✅ 03_common.yml completed"
+
+# =========================================================
+# 04. Control Plane Init
+# =========================================================
+- import_playbook: playbook/04_cp_init.yml
+
+- name: Verify 04_cp_init completed
+  hosts: localhost
+  gather_facts: false
+
+  tasks:
+    - pause:
+        seconds: 10
+
+    - debug:
+        msg: "✅ 04_cp_init.yml completed"
+
+# =========================================================
+# 05. Worker / Control Plane Join
+# =========================================================
+- import_playbook: playbook/05_join.yml
+
+- name: Verify 05_join completed
+  hosts: localhost
+  gather_facts: false
+
+  tasks:
+    - pause:
+        seconds: 10
+
+    - debug:
+        msg: "✅ 05_join.yml completed"
+
+# =========================================================
+# 06. Install Calico CNI
+# =========================================================
+- import_playbook: playbook/06_install_calico.yml
+
+- name: Verify 06_install_calico completed
+  hosts: localhost
+  gather_facts: false
+
+  tasks:
+    - pause:
+        seconds: 10
+
+    - debug:
+        msg: "✅ 06_install_calico.yml completed"
+
+# =========================================================
+# Final Status
+# =========================================================
+- name: Final Status
+  hosts: localhost
+  gather_facts: false
+
+  tasks:
+    - debug:
+        msg: "🎉 All Kubernetes Playbooks Completed Successfully"

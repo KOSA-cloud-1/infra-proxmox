@@ -1,0 +1,88 @@
+#cloud-config
+# VM 최초 부팅 시 cloud-init이 이 파일을 읽어 자동으로 실행합니다.
+# Terraform이 .tftpl 변수를 렌더링한 뒤 Proxmox snippet으로 업로드합니다.
+
+package_update: true
+package_upgrade: false
+
+hostname: ${hostname}
+preserve_hostname: false
+
+# HAProxy(로드밸런서)와 keepalived(VIP 이중화) 패키지 설치
+packages:
+  - haproxy
+  - keepalived
+  - qemu-guest-agent
+
+write_files:
+  # keepalived VIP를 로컬 NIC에 바인딩하기 위한 커널 파라미터
+  # VIP는 실제 NIC IP가 아니므로 nonlocal_bind=1 이 없으면 바인딩 실패
+  - path: /etc/sysctl.d/99-haproxy-keepalived.conf
+    owner: root:root
+    permissions: '0644'
+    content: |
+      net.ipv4.ip_nonlocal_bind=1
+
+  # Terraform이 렌더링한 HAProxy 설정 파일
+  # 80/443 포트를 VIP에서 수신해 K8s Ingress VIP로 포워딩
+  - path: /etc/haproxy/haproxy.cfg
+    owner: root:root
+    permissions: '0644'
+    content: |
+      ${indent(6, haproxy_config)}
+
+  # keepalived 설정: VRRP를 이용한 VIP 이중화 (Active/Passive HA)
+  - path: /etc/keepalived/keepalived.conf
+    owner: root:root
+    permissions: '0600'
+    content: |
+      global_defs {
+        router_id ${keepalived_router_id}
+        enable_script_security
+        script_user root
+      }
+
+      # HAProxy 프로세스 상태를 주기적으로 체크
+      # HAProxy가 죽으면 weight -30 적용 → 우선순위 하락 → 상대방이 MASTER 승격
+      vrrp_script chk_haproxy {
+        script "/usr/bin/systemctl is-active --quiet haproxy"
+        interval 2   # 2초마다 체크
+        fall 2       # 2번 연속 실패 시 DOWN 판정
+        rise 2       # 2번 연속 성공 시 UP 복구
+        weight -30   # DOWN 시 priority에서 30 차감
+      }
+
+      vrrp_instance VI_1 {
+        state BACKUP    # 양쪽 모두 BACKUP으로 시작, priority가 높은 쪽이 자동으로 MASTER 됨
+        interface ${keepalived_interface}          # VIP를 올릴 NIC (eth0 또는 ens18)
+        virtual_router_id ${virtual_router_id}    # 동일 L2에서 유일해야 함
+        priority ${keepalived_priority}           # 높을수록 MASTER 우선권 (haproxy-1: 110, haproxy-2: 100)
+        advert_int 1                              # VRRP 광고 주기 (1초)
+        preempt_delay 30                          # 복구 후 30초 대기 후 MASTER 탈취
+        unicast_src_ip ${keepalived_unicast_src}  # 이 VM 자신의 IP
+%{ if length(keepalived_peers) > 0 ~}
+        unicast_peer {   # 멀티캐스트 대신 유니캐스트로 VRRP 전송 (VLAN 환경에서 권장)
+%{ for peer in keepalived_peers ~}
+          ${peer}
+%{ endfor ~}
+        }
+%{ endif ~}
+        authentication {
+          auth_type PASS
+          auth_pass ${keepalived_auth_pass}  # VRRP 패킷 인증 비밀번호
+        }
+        virtual_ipaddress {
+          ${haproxy_vip}/${dmz_prefix_length} dev ${keepalived_interface}  # 부동 VIP
+        }
+        track_script {
+          chk_haproxy  # HAProxy 상태에 따라 MASTER/BACKUP 전환
+        }
+      }
+
+# VM 부팅 시 순서대로 실행
+runcmd:
+  - sysctl --system                             # nonlocal_bind 커널 파라미터 적용
+  - systemctl enable --now qemu-guest-agent     # Proxmox QEMU guest agent 활성화
+  - systemctl enable haproxy keepalived         # 재부팅 시 자동 시작 등록
+  - sh -c "haproxy -c -f /etc/haproxy/haproxy.cfg && systemctl restart haproxy"
+  - systemctl restart keepalived

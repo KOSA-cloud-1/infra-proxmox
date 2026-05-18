@@ -1,0 +1,81 @@
+# =========================================================
+# Proxmox API 접속 정보
+# =========================================================
+virtual_environment_endpoint  = "https://YOUR_PROXMOX_IP:8006/"
+virtual_environment_api_token = "YOUR_API_TOKEN"
+
+# =========================================================
+# Template 정보
+# =========================================================
+template_vm_id = 8000
+template_name  = "YOUR_TEMPLATE_NAME"
+
+# =========================================================
+# SSH 공개키
+# =========================================================
+ssh_public_key = "YOUR_SSH_PUBLIC_KEY"
+
+# =========================================================
+# 네트워크 설정
+# =========================================================
+gateway = "172.17.128.1"
+
+# =========================================================
+# Control Plane VM 구성
+# =========================================================
+cp_nodes = {
+  cp1 = {
+    id     = 1001
+    node   = "YOUR_NODE_NAME"
+    ip1g   = "YOUR_MGMT_IP"    # 관리망 (vmbr0, VLAN40, 1G)
+    ip10g  = "YOUR_INTERNAL_IP" # Kubernetes 내부망 (vmbr1, 10G)
+    cpu    = 2
+    memory = 4096
+  }
+  cp2 = {
+    id     = 1002
+    node   = "YOUR_NODE_NAME"
+    ip1g   = "YOUR_MGMT_IP"
+    ip10g  = "YOUR_INTERNAL_IP"
+    cpu    = 4
+    memory = 4096
+  }
+  cp3 = {
+    id     = 1003
+    node   = "YOUR_NODE_NAME"
+    ip1g   = "YOUR_MGMT_IP"
+    ip10g  = "YOUR_INTERNAL_IP"
+    cpu    = 2
+    memory = 4096
+  }
+}
+
+# =========================================================
+# Worker Node VM 구성
+# =========================================================
+worker_nodes = {
+  worker1 = {
+    id     = 1011
+    node   = "YOUR_NODE_NAME"
+    ip1g   = "YOUR_MGMT_IP"
+    ip10g  = "YOUR_INTERNAL_IP"
+    cpu    = 4
+    memory = 2048
+  }
+  worker2 = {
+    id     = 1012
+    node   = "YOUR_NODE_NAME"
+    ip1g   = "YOUR_MGMT_IP"
+    ip10g  = "YOUR_INTERNAL_IP"
+    cpu    = 4
+    memory = 2048
+  }
+  worker3 = {
+    id     = 1013
+    node   = "YOUR_NODE_NAME"
+    ip1g   = "YOUR_MGMT_IP"
+    ip10g  = "YOUR_INTERNAL_IP"
+    cpu    = 4
+    memory = 2048
+  }
+}
