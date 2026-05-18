@@ -86,9 +86,15 @@ variable "ssh_public_key" {
 }
 
 variable "dmz_bridge" {
-  description = "DMZ VLAN이 연결된 Proxmox bridge"
+  description = "DMZ VLAN이 연결된 Proxmox bridge (1G, vmbr0)"
   type        = string
   default     = "vmbr0"
+}
+
+variable "internal_bridge" {
+  description = "10G 내부망 브리지 (K8s Ingress 방향 포워딩용, vmbr1)"
+  type        = string
+  default     = "vmbr1"
 }
 
 variable "dmz_vlan_id" {
@@ -125,12 +131,20 @@ variable "haproxy_instances" {
   type = map(object({
     id                  = number
     node                = string
-    ip                  = string
+    ip1g                = string           # DMZ IP (eth0, vmbr0, 1G)
+    ip10g               = string           # 내부망 IP (eth1, vmbr1, 10G)
     cpu                 = optional(number, 2)
     memory              = optional(number, 2048)
+    balloon             = optional(number, 512)
     disk_size           = optional(number, 20)
     keepalived_priority = optional(number, 100)
   }))
+}
+
+variable "internal_prefix_length" {
+  description = "내부망(vmbr1) subnet prefix length"
+  type        = number
+  default     = 24
 }
 
 variable "haproxy_balance_algorithm" {

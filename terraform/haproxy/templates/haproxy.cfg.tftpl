@@ -7,31 +7,37 @@ global
   user haproxy
   group haproxy
   daemon
-  maxconn ${maxconn}
+  maxconn ${maxconn}  # 동시 최대 연결 수 (terraform 변수로 주입)
 
 defaults
   log global
-  mode tcp
+  mode tcp          # L4(TCP) 모드: TLS 패킷을 그대로 통과시킴 (SSL 종료 없음)
   option tcplog
   timeout connect 5s
   timeout client 50s
   timeout server 50s
 
+# ── HTTP (80) ─────────────────────────────────────────────
+# 외부에서 DMZ HAProxy VIP:80 으로 들어오는 트래픽 수신
 frontend http_in
-  bind ${frontend_ip}:80
+  bind ${frontend_ip}:80   # HAProxy VIP (keepalived가 관리하는 부동 IP)
   mode tcp
   default_backend ingress_http
 
+# K8s Ingress VIP(MetalLB 등):80 으로 포워딩
 backend ingress_http
   mode tcp
-  balance ${balance_algorithm}
+  balance ${balance_algorithm}   # 로드밸런싱 알고리즘 (기본: roundrobin)
   server ingress ${ingress_vip}:80 check
 
+# ── HTTPS (443) ───────────────────────────────────────────
+# 외부에서 DMZ HAProxy VIP:443 으로 들어오는 트래픽 수신
 frontend https_in
-  bind ${frontend_ip}:443
+  bind ${frontend_ip}:443  # HAProxy VIP:443
   mode tcp
   default_backend ingress_https
 
+# K8s Ingress VIP:443 으로 포워딩 (TLS는 Ingress Controller가 처리)
 backend ingress_https
   mode tcp
   balance ${balance_algorithm}
