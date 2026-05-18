@@ -4,8 +4,8 @@
 infra-proxmox/
 ├─ terraform/
 │  ├─ haproxy/
-│  └─ yml/
-└─ cloud-init/
+│  └─ k8s-node/
+└─ ansible/
 ```
 
 ### Terraform 구성
@@ -29,6 +29,6 @@ terraform apply
 적용 전에 `terraform.tfvars`에서 다음 값을 실제 값으로 변경해야 한다.
 
 - `haproxy_vip`: VLAN20 DMZ HAProxy VIP
-- `ingress_vip`: VLAN40 Kubernetes Ingress VIP
-- `keepalived_interface`: VM 내부 NIC 이름, 예: `eth0` 또는 `ens18`
-- `keepalived_auth_pass`: 8자 이하 VRRP 인증 문자열
+- `ingress_vip`: 172.17.130.
+- `keepalived_interface`: eth0
+- `keepalived_auth_pass`: kosa

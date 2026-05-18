@@ -16,7 +16,7 @@ Proxmox VM 위에 kubeadm 기반 Kubernetes 클러스터를 구성하기 위한 
 | Ansible SSH | 관리망 `172.17.128.0/22` | 작업 PC 또는 Ansible VM이 접속하는 주소 |
 | Kubernetes API VIP | 관리망 `172.17.128.30` | 외부 `kubectl` 접근용 API endpoint |
 | Kubernetes node IP | 10G망 `10.10.10.0/24` | kubelet node IP, control-plane advertise, Calico node IP |
-| Pod CIDR | `172.20.0.0/16` | Kubernetes Pod 대역 |
+| Pod CIDR | `10.244.0.0/16` | Kubernetes Pod 대역 |
 
 API VIP는 관리망에 있고, 노드 간 Kubernetes/Calico 통신은 `node_ip`로 지정한 10G망을 사용합니다.
 
@@ -26,9 +26,11 @@ API VIP는 관리망에 있고, 노드 간 Kubernetes/Calico 통신은 `node_ip`
 | --- | --- |
 | `inventory.ini` | 실제 VM 접속 주소와 Kubernetes node IP 정의 |
 | `inventory.ini.example` | inventory 작성 예시 |
-| `group_vars/all.yml` | VIP, NIC, CIDR 공통 변수 |
+| `group_vars/all.yml` | VIP, NIC, CIDR, etcd 디스크 경로, Kubernetes 버전 등 공통 변수 |
 | `playbook.yml` | 클러스터 구성 진입점 |
-| `playbook/initiallize.yml` | 기존 클러스터 상태 초기화 |
+| `playbook/initialize.yml` | 기존 클러스터 상태 초기화 (패키지 유지) |
+| `playbook/reset.yml` | 클러스터 완전 초기화 (패키지 포함 제거) |
+| `playbook/reset-kube-vip.yml` | control-plane만 초기화 |
 
 `inventory.ini`는 SSH key 경로와 실제 IP가 들어가므로 git에 포함하지 않습니다.
 `admin.conf` 같은 kubeconfig는 클러스터 관리자 인증 정보이므로 git에 포함하지 않습니다.
@@ -72,7 +74,7 @@ ansible-inventory --host cp1
 ansible k8s -m ping
 ansible k8s -b -m command -a 'ip -br -4 addr'
 ansible-playbook --syntax-check playbook.yml
-ansible-playbook --syntax-check playbook/initiallize.yml
+ansible-playbook --syntax-check playbook/initialize.yml
 ```
 
 `cp1`의 `node_ip`, `vip_address`, `node_interface` 값이 의도와 맞는지 확인합니다.
@@ -82,7 +84,7 @@ ansible-playbook --syntax-check playbook/initiallize.yml
 기존 Kubernetes 상태가 남아 있으면 먼저 초기화합니다.
 
 ```bash
-ansible-playbook playbook/initiallize.yml
+ansible-playbook playbook/initialize.yml
 ```
 
 새 VM이면 생략할 수 있습니다.
@@ -95,11 +97,13 @@ ansible-playbook playbook.yml
 
 실행 흐름은 다음 순서입니다.
 
-1. hostname과 기본 VM 상태 정리
-2. containerd, kubelet, kubeadm, kubectl 설치
-3. kube-vip manifest 생성과 cp1 초기화
-4. kube-vip 권한 부여와 Calico 설치
-5. cp2, cp3, worker join
+1. etcd 전용 로컬 디스크 마운트 (control-plane)
+2. hostname 및 `/etc/hosts` 설정 (전체 노드)
+3. apt 사전 작업 (전체 노드)
+4. containerd, kubelet, kubeadm, kubectl 설치 (전체 노드)
+5. kube-vip manifest 생성 및 cp1 kubeadm init
+6. cp2, cp3 control-plane join → worker join
+7. Calico CNI 설치
 
 ## 완료 후 확인
 
@@ -122,6 +126,7 @@ ansible kube_vip -b -m shell -a 'hostname; ip -br addr show eth0 | grep 172.17.1
 
 - `node_ip`를 바꾸면 기존 클러스터와 인증서가 꼬일 수 있으므로 초기화 후 다시 구성합니다.
 - 10G NIC 이름이 `eth1`이 아니면 `group_vars/all.yml`의 `node_interface`를 수정합니다.
+- Kubernetes 버전 변경은 `group_vars/all.yml`의 `kube_version`만 수정합니다. APT 저장소 URL도 자동으로 반영됩니다.
 - VIP는 외부 API 접근용이고, Calico는 클러스터 내부 Kubernetes service endpoint를 사용합니다.
 - worker kubeconfig는 조회 전용입니다. 리소스 생성, 수정, 삭제는 control-plane의 관리자 kubeconfig로 수행합니다.
 - playbook은 반복 실행 가능하도록 구성했지만, 클러스터 구조를 바꾸는 변경은 초기화 후 재실행하는 편이 단순합니다.
