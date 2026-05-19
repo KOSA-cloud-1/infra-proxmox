@@ -31,7 +31,7 @@ API VIP는 관리망에 있고, 노드 간 Kubernetes/Calico 통신은 `node_ip`
 | `playbook/initialize.yml` | 기존 클러스터 상태 초기화 (패키지 유지) |
 | `playbook/reset.yml` | 클러스터 완전 초기화 (패키지 포함 제거) |
 | `playbook/reset-kube-vip.yml` | control-plane만 초기화 |
-| `playbook/07_install_helm.yml` | control-plane 노드에 Helm CLI 설치 |
+| `playbook/07_install_helm.yml` | cp1 노드에 Helm CLI 설치 |
 
 `inventory.ini`는 SSH key 경로와 실제 IP가 들어가므로 git에 포함하지 않습니다.
 `admin.conf` 같은 kubeconfig는 클러스터 관리자 인증 정보이므로 git에 포함하지 않습니다.
@@ -105,7 +105,7 @@ ansible-playbook playbook.yml
 5. kube-vip manifest 생성 및 cp1 kubeadm init
 6. cp2, cp3 control-plane join → worker join
 7. Calico CNI 설치
-8. Helm CLI 설치 (control-plane)
+8. Helm CLI 설치 (cp1)
 
 ## 완료 후 확인
 
@@ -114,7 +114,7 @@ ansible cp1 -b -m command -a 'kubectl --kubeconfig=/etc/kubernetes/admin.conf ge
 ansible cp1 -b -m command -a 'kubectl --kubeconfig=/etc/kubernetes/admin.conf -n kube-system get pods -o wide'
 ansible workers -b --become-user kosa -m command -a 'kubectl get nodes'
 ansible kube_vip -b -m shell -a 'hostname; ip -br addr show eth0 | grep 172.17.128.30 || true'
-ansible control_plane -b -m command -a 'helm version --short'
+ansible cp1 -b -m command -a 'helm version --short'
 ```
 
 정상 기준은 다음과 같습니다.
@@ -124,7 +124,7 @@ ansible control_plane -b -m command -a 'helm version --short'
 - `calico-node`, `kube-vip`, control-plane Pod가 `Running`
 - worker의 `kubectl get nodes`가 조회 전용 kubeconfig로 동작
 - control-plane 중 한 대가 `172.17.128.30` VIP를 보유
-- control-plane에서 `helm version --short`가 정상 출력
+- cp1에서 `helm version --short`가 정상 출력
 
 ## 운영 메모
 

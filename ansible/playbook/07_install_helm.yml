@@ -1,6 +1,6 @@
 # =========================================================
 # Helm CLI 설치
-# - Helm은 Kubernetes 리소스가 아니라 운영용 CLI이므로 control-plane에 설치
+# - Helm은 Kubernetes 리소스가 아니라 운영용 CLI이므로 cp1에만 설치
 # - cert-manager 같은 chart 배포는 별도 GitOps/운영 단계에서 수행
 # =========================================================
 - name: Install Helm CLI
