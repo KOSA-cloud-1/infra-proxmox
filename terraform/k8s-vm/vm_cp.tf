@@ -39,7 +39,7 @@ resource "proxmox_virtual_environment_vm" "cp" {
   disk {
     datastore_id = var.vm_datastore_id
     interface    = "scsi0"
-    size         = 20
+    size         = each.value.disk_size
     discard      = "on"
     iothread     = true
     ssd          = true
