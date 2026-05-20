@@ -11,12 +11,11 @@ global
 
 defaults
   log global
-  mode tcp          # L4(TCP) 모드: TLS 패킷을 그대로 통과시킴 (SSL 종료 없음)
+  mode tcp
   option tcplog
   timeout connect 5s
   timeout client 50s
   timeout server 50s
-  timeout tunnel 1h
 
 # ── HTTP (80) ─────────────────────────────────────────────
 # 외부에서 DMZ HAProxy VIP:80 으로 들어오는 트래픽 수신
@@ -30,16 +29,3 @@ backend ingress_http
   mode tcp
   balance ${balance_algorithm}   # 로드밸런싱 알고리즘 (기본: roundrobin)
   server ingress ${ingress_vip}:80 check
-
-# ── HTTPS (443) ───────────────────────────────────────────
-# 외부에서 DMZ HAProxy VIP:443 으로 들어오는 트래픽 수신
-frontend https_in
-  bind ${frontend_ip}:443  # HAProxy VIP:443
-  mode tcp
-  default_backend ingress_https
-
-# K8s Ingress VIP:443 으로 포워딩 (TLS는 Ingress Controller가 처리)
-backend ingress_https
-  mode tcp
-  balance ${balance_algorithm}
-  server ingress ${ingress_vip}:443 check

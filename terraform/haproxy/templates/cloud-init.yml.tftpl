@@ -24,7 +24,7 @@ write_files:
       net.ipv4.ip_nonlocal_bind=1
 
   # Terraform이 렌더링한 HAProxy 설정 파일
-  # 80/443 포트를 VIP에서 수신해 K8s Ingress VIP로 포워딩
+  # 80 포트를 VIP에서 수신해 K8s Ingress VIP로 포워딩
   - path: /etc/haproxy/haproxy.cfg
     owner: root:root
     permissions: '0644'
