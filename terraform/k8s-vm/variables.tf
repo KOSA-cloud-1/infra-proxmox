@@ -82,13 +82,13 @@ variable "ssh_public_key" {
 # =========================================================
 # Storage
 # =========================================================
-variable "vm_datastore_id" {
+variable "worker_datastore_id" {
   description = "VM OS 디스크 및 EFI 디스크 datastore"
   type        = string
   default     = "ceph-rbd"
 }
 
-variable "cp_etcd_datastore_id" {
+variable "cp_datastore_id" {
   description = "Control Plane 전용 etcd 추가 디스크 datastore"
   type        = string
   default     = "local-lvm"
