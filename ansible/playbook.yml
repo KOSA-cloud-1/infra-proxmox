@@ -122,6 +122,22 @@
         msg: "✅ 06_install_calico.yml completed"
 
 # =========================================================
+# 07. Install Helm CLI
+# =========================================================
+- import_playbook: playbook/07_install_helm.yml
+
+- name: Verify 07_install_helm completed
+  hosts: localhost
+  gather_facts: false
+
+  tasks:
+    - pause:
+        seconds: 5
+
+    - debug:
+        msg: "✅ 07_install_helm.yml completed"
+
+# =========================================================
 # Final Status
 # =========================================================
 - name: Final Status

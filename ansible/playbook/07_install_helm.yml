@@ -1,0 +1,96 @@
+# =========================================================
+# Helm CLI 설치
+# - Helm은 Kubernetes 리소스가 아니라 운영용 CLI이므로 cp1에만 설치
+# - cert-manager 같은 chart 배포는 별도 GitOps/운영 단계에서 수행
+# =========================================================
+- name: Install Helm CLI
+  hosts: cp1
+  become: true
+
+  tasks:
+    # =====================================================
+    # Helm APT 설치에 필요한 패키지 준비
+    # =====================================================
+    - name: Install Helm apt dependencies
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gpg
+        state: present
+        update_cache: yes
+      register: helm_dependencies_apt_result
+      retries: 5
+      delay: 10
+      until: helm_dependencies_apt_result is succeeded
+
+    # =====================================================
+    # APT keyring 디렉터리 생성
+    # =====================================================
+    - name: Create keyrings directory
+      file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+
+    # =====================================================
+    # Helm APT GPG key 다운로드
+    # =====================================================
+    - name: Download Helm GPG key
+      get_url:
+        url: https://packages.buildkite.com/helm-linux/helm-debian/gpgkey
+        dest: /tmp/helm.key
+        mode: '0644'
+
+    # =====================================================
+    # Helm GPG key 변환
+    # =====================================================
+    - name: Convert Helm GPG key
+      command: gpg --batch --yes --dearmor -o /etc/apt/keyrings/helm.gpg /tmp/helm.key
+      changed_when: false
+
+    # =====================================================
+    # Helm APT repository 추가
+    # =====================================================
+    - name: Add Helm repo
+      copy:
+        dest: /etc/apt/sources.list.d/helm-stable-debian.list
+        mode: '0644'
+        content: |
+          deb [signed-by=/etc/apt/keyrings/helm.gpg] https://packages.buildkite.com/helm-linux/helm-debian/any/ any main
+
+    # =====================================================
+    # Helm repository 반영을 위한 apt update
+    # =====================================================
+    - name: Update apt cache for Helm repo
+      apt:
+        update_cache: yes
+      register: helm_repo_apt_result
+      retries: 5
+      delay: 10
+      until: helm_repo_apt_result is succeeded
+
+    # =====================================================
+    # Helm CLI 설치
+    # =====================================================
+    - name: Install Helm package
+      apt:
+        name: helm
+        state: present
+      register: helm_package_apt_result
+      retries: 5
+      delay: 10
+      until: helm_package_apt_result is succeeded
+
+    # =====================================================
+    # 설치 버전 확인
+    # =====================================================
+    - name: Verify Helm version
+      command: helm version --short
+      register: helm_version
+      changed_when: false
+
+    - name: Print Helm version
+      debug:
+        msg: "{{ inventory_hostname }}: {{ helm_version.stdout }}"
