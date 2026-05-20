@@ -38,7 +38,7 @@ ingress_vip = "172.17.128.240"
 haproxy_instances = {
   haproxy-1 = {
     id                  = 1021
-    node                = "team11"
+    node                = "team14"
     ip1g                = "172.17.32.21"    # DMZ IP (eth0, vmbr0, VLAN20)
     cpu                 = 2
     memory              = 2048
@@ -49,7 +49,7 @@ haproxy_instances = {
 
   haproxy-2 = {
     id                  = 1022
-    node                = "team14"
+    node                = "team11"
     ip1g                = "172.17.32.22"    # DMZ IP (eth0, vmbr0, VLAN20)
     cpu                 = 2
     memory              = 2048
