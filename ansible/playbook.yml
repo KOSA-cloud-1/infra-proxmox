@@ -4,6 +4,7 @@
 # - import_playbook: playbook/03_common.yml            # k8s 공통 패키지 설치
 # - import_playbook: playbook/04_cp_init.yml           # kubeadm init + kube-vip
 # - import_playbook: playbook/05_join.yml              # CP/Worker 노드 join
+# - import_playbook: playbook/05_post_join_kube_vip.yml # CP join 이후 kube-vip 복구
 # - import_playbook: playbook/06_install_calico.yml    # Calico CNI 설치
 
 # # 실행
@@ -104,6 +105,22 @@
 
     - debug:
         msg: "✅ 05_join.yml completed"
+
+# =========================================================
+# 05b. Post-join kube-vip Repair
+# =========================================================
+- import_playbook: playbook/05_post_join_kube_vip.yml
+
+- name: Verify 05_post_join_kube_vip completed
+  hosts: localhost
+  gather_facts: false
+
+  tasks:
+    - pause:
+        seconds: 5
+
+    - debug:
+        msg: "✅ 05_post_join_kube_vip.yml completed"
 
 # =========================================================
 # 06. Install Calico CNI

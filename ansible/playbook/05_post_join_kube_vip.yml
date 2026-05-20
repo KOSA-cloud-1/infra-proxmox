@@ -1,0 +1,152 @@
+# =========================================================
+# Post-join install / repair kube-vip static pod manifest
+# - kubeadm join/reset can remove /etc/kubernetes/manifests.
+# - Run this after all control-plane nodes have joined so every CP can
+#   participate in kube-vip leader election and take over the API VIP.
+# =========================================================
+- name: Install kube-vip manifest on control-plane nodes
+  hosts: kube_vip
+  become: true
+
+  tasks:
+    - name: Check local Kubernetes API on each control-plane
+      command: >
+        kubectl --kubeconfig=/etc/kubernetes/admin.conf
+        --server=https://{{ node_ip | default(ansible_host) }}:6443
+        --request-timeout=10s
+        get --raw=/readyz
+      register: local_api_ready
+      retries: 12
+      delay: 5
+      until: local_api_ready.rc == 0
+      changed_when: false
+
+    - name: Ensure kube-vip lease RBAC exists
+      shell: |
+        kubectl --kubeconfig=/etc/kubernetes/admin.conf \
+          --server=https://{{ node_ip | default(ansible_host) }}:6443 \
+          --request-timeout=10s apply -f - <<'EOF'
+        apiVersion: rbac.authorization.k8s.io/v1
+        kind: ClusterRole
+        metadata:
+          name: kube-vip-lease-manager
+        rules:
+          - apiGroups: ["coordination.k8s.io"]
+            resources: ["leases"]
+            verbs: ["get", "list", "watch", "create", "update", "patch"]
+        ---
+        apiVersion: rbac.authorization.k8s.io/v1
+        kind: ClusterRoleBinding
+        metadata:
+          name: kube-vip-lease-manager
+        subjects:
+          - kind: User
+            name: kubernetes-admin
+            apiGroup: rbac.authorization.k8s.io
+        roleRef:
+          kind: ClusterRole
+          name: kube-vip-lease-manager
+          apiGroup: rbac.authorization.k8s.io
+        EOF
+      args:
+        executable: /bin/bash
+      run_once: true
+
+    - name: Check Kubernetes API through VIP before repair
+      command: curl -sk --connect-timeout 3 https://{{ vip_address }}:6443/readyz
+      register: vip_api_before_repair
+      failed_when: false
+      changed_when: false
+      run_once: true
+
+    - name: Add bootstrap VIP when VIP API is unreachable
+      shell: |
+        if ip addr show dev {{ vip_interface }} | grep -Fq "{{ vip_address }}/{{ vip_cidr | default(32) }}"; then
+          echo present
+        else
+          ip addr add {{ vip_address }}/{{ vip_cidr | default(32) }} dev {{ vip_interface }}
+          echo added
+        fi
+      args:
+        executable: /bin/bash
+      register: bootstrap_vip
+      changed_when: "'added' in bootstrap_vip.stdout"
+      when: vip_api_before_repair.rc != 0
+      run_once: true
+
+    - name: Ensure Kubernetes manifests directory exists
+      file:
+        path: /etc/kubernetes/manifests
+        state: directory
+        mode: '0755'
+
+    - name: Pull kube-vip image
+      command: crictl pull ghcr.io/kube-vip/kube-vip:{{ kube_vip_version }}
+      changed_when: false
+
+    - name: Render kube-vip manifest when missing or changed
+      shell: |
+        set -euo pipefail
+        tmp_manifest="$(mktemp)"
+        container_name="vip-manifest-$$"
+
+        ctr -n k8s.io run --rm --net-host ghcr.io/kube-vip/kube-vip:{{ kube_vip_version }} "${container_name}" /kube-vip manifest pod \
+          --interface {{ vip_interface }} \
+          --address {{ vip_address }} \
+          --vipSubnet /{{ vip_cidr | default(32) }} \
+          --controlplane \
+          --arp \
+          --leaderElection \
+          --leaseDuration 15 \
+          --leaseRenewDuration 10 \
+          --leaseRetry 2 \
+          > "${tmp_manifest}"
+
+        if [ ! -f /etc/kubernetes/manifests/kube-vip.yaml ] || ! cmp -s "${tmp_manifest}" /etc/kubernetes/manifests/kube-vip.yaml; then
+          install -m 0644 "${tmp_manifest}" /etc/kubernetes/manifests/kube-vip.yaml
+          echo changed
+        fi
+
+        rm -f "${tmp_manifest}"
+      args:
+        executable: /bin/bash
+      register: kube_vip_manifest
+      changed_when: "'changed' in kube_vip_manifest.stdout"
+
+    - name: Wait for kube-vip container to start
+      shell: crictl ps --name kube-vip -q
+      register: kube_vip_running
+      retries: 30
+      delay: 5
+      until: kube_vip_running.stdout | length > 0
+      changed_when: false
+
+    - name: Remove bootstrap VIP after kube-vip starts
+      shell: |
+        ip addr del {{ vip_address }}/{{ vip_cidr | default(32) }} dev {{ vip_interface }} 2>/dev/null || true
+      args:
+        executable: /bin/bash
+      changed_when: false
+      when: vip_api_before_repair.rc != 0
+      run_once: true
+
+    - name: Wait for Kubernetes API through VIP
+      command: curl -sk --connect-timeout 3 https://{{ vip_address }}:6443/readyz
+      register: vip_api_after_repair
+      retries: 30
+      delay: 5
+      until: vip_api_after_repair.rc == 0
+      changed_when: false
+      run_once: true
+
+    - name: Print kube-vip and VIP status
+      shell: |
+        echo "node=$(hostname)"
+        echo "kube_vip_container=$(crictl ps --name kube-vip -q | head -n1)"
+        ip -br addr show {{ vip_interface }} | grep -F "{{ vip_address }}/{{ vip_cidr | default(32) }}" || true
+      register: kube_vip_status
+      changed_when: false
+
+    - name: Show kube-vip status
+      debug:
+        msg: "{{ kube_vip_status.stdout }}"
