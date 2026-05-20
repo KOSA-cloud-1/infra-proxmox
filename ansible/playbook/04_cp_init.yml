@@ -22,6 +22,15 @@
     # cp1은 kubeadm init 중 kube-vip가 static pod로 떠서 leader election을
     # 시도하면 bootstrap VIP를 건드려 API server 기동에 실패하므로
     # init 완료 후 RBAC 적용 단계에서 manifest를 배치함
+    - name: Create kube-vip local kubeconfig pointing to node's own API server
+      shell: |
+        sed 's|server: https://.*:6443|server: https://{{ node_ip | default(ansible_host) }}:6443|' \
+          /etc/kubernetes/admin.conf > /etc/kubernetes/kube-vip-local.conf
+        chmod 0600 /etc/kubernetes/kube-vip-local.conf
+      args:
+        executable: /bin/bash
+      when: inventory_hostname != 'cp1'
+
     - name: Generate kube-vip manifest
       shell: |
         ctr -n k8s.io run --rm --net-host ghcr.io/kube-vip/kube-vip:{{ kube_vip_version }} vip /kube-vip manifest pod \
@@ -34,6 +43,7 @@
           --leaseDuration 15 \
           --leaseRenewDuration 10 \
           --leaseRetry 2 \
+          --k8sConfigPath /etc/kubernetes/kube-vip-local.conf \
         > /etc/kubernetes/manifests/kube-vip.yaml
       args:
         executable: /bin/bash
@@ -52,6 +62,7 @@
           --leaseDuration 15 \
           --leaseRenewDuration 10 \
           --leaseRetry 2 \
+          --k8sConfigPath /etc/kubernetes/kube-vip-local.conf \
         > /tmp/kube-vip-manifest.yaml
       args:
         executable: /bin/bash
@@ -298,6 +309,14 @@
     # - init 전에 배치하면 kube-vip가 API server 없이 leader election을
     #   시도하다가 bootstrap VIP를 건드려 API server 기동 실패
     # =====================================================
+    - name: Create kube-vip local kubeconfig pointing to cp1's own API server
+      shell: |
+        sed 's|server: https://.*:6443|server: https://{{ node_ip | default(ansible_host) }}:6443|' \
+          /etc/kubernetes/admin.conf > /etc/kubernetes/kube-vip-local.conf
+        chmod 0600 /etc/kubernetes/kube-vip-local.conf
+      args:
+        executable: /bin/bash
+
     - name: Install kube-vip manifest after RBAC is ready
       copy:
         src: /tmp/kube-vip-manifest.yaml

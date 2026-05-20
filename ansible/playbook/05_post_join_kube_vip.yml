@@ -84,6 +84,15 @@
       command: crictl pull ghcr.io/kube-vip/kube-vip:{{ kube_vip_version }}
       changed_when: false
 
+    - name: Create kube-vip local kubeconfig pointing to node's own API server
+      shell: |
+        sed 's|server: https://.*:6443|server: https://{{ node_ip | default(ansible_host) }}:6443|' \
+          /etc/kubernetes/admin.conf > /etc/kubernetes/kube-vip-local.conf
+        chmod 0600 /etc/kubernetes/kube-vip-local.conf
+      args:
+        executable: /bin/bash
+      changed_when: false
+
     - name: Render kube-vip manifest when missing or changed
       shell: |
         set -euo pipefail
@@ -100,6 +109,7 @@
           --leaseDuration 15 \
           --leaseRenewDuration 10 \
           --leaseRetry 2 \
+          --k8sConfigPath /etc/kubernetes/kube-vip-local.conf \
           > "${tmp_manifest}"
 
         if [ ! -f /etc/kubernetes/manifests/kube-vip.yaml ] || ! cmp -s "${tmp_manifest}" /etc/kubernetes/manifests/kube-vip.yaml; then
