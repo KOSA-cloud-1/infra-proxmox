@@ -161,6 +161,7 @@ variable "cp_nodes" {
     cpu     = number
     memory  = number
     balloon = optional(number, 512)
+    disk_size = number
   }))
 }
 
@@ -175,5 +176,6 @@ variable "worker_nodes" {
     cpu     = number
     memory  = number
     balloon = optional(number, 512)
+    disk_size = number
   }))
 }
