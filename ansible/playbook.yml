@@ -13,18 +13,18 @@
 # =========================================================
 # 00. Prepare ETCD Disk
 # =========================================================
-- import_playbook: playbook/00_prepare_etcd_disk.yml
+# - import_playbook: playbook/00_prepare_etcd_disk.yml
 
-- name: Verify 00_prepare_etcd_disk completed
-  hosts: localhost
-  gather_facts: false
+# - name: Verify 00_prepare_etcd_disk completed
+#   hosts: localhost
+#   gather_facts: false
 
-  tasks:
-    - pause:
-        seconds: 5
+#   tasks:
+#     - pause:
+#         seconds: 5
 
-    - debug:
-        msg: "✅ 00_prepare_etcd_disk.yml completed"
+#     - debug:
+#         msg: "✅ 00_prepare_etcd_disk.yml completed"
 
 # =========================================================
 # 01. Hostname Configuration

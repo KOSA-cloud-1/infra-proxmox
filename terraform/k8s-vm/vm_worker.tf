@@ -10,7 +10,7 @@ resource "proxmox_virtual_environment_vm" "worker" {
   bios    = "ovmf"
 
   efi_disk {
-    datastore_id = var.vm_datastore_id
+    datastore_id = var.worker_datastore_id
     file_format  = "raw"
     type         = "4m"
   }
@@ -37,12 +37,13 @@ resource "proxmox_virtual_environment_vm" "worker" {
   boot_order    = ["scsi0"]
 
   disk {
-    datastore_id = var.vm_datastore_id
+    datastore_id = var.worker_datastore_id
     interface    = "scsi0"
     size         = each.value.disk_size
     discard      = "on"
     iothread     = true
     ssd          = true
+    cache        = "none"
   }
 
   # net0: 관리망 (vmbr0, VLAN40, 1G)

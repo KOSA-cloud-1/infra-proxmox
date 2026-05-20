@@ -10,7 +10,7 @@ resource "proxmox_virtual_environment_vm" "cp" {
   bios    = "ovmf"
 
   efi_disk {
-    datastore_id = var.vm_datastore_id
+    datastore_id = var.cp_datastore_id
     file_format  = "raw"
     type         = "4m"
   }
@@ -37,20 +37,15 @@ resource "proxmox_virtual_environment_vm" "cp" {
   boot_order    = ["scsi0"]
 
   disk {
-    datastore_id = var.vm_datastore_id
+    datastore_id = var.cp_datastore_id
     interface    = "scsi0"
     size         = each.value.disk_size
     discard      = "on"
     iothread     = true
     ssd          = true
+    cache        = "none"
   }
 
-  # CP 전용 etcd 데이터 디스크
-  disk {
-    datastore_id = var.cp_etcd_datastore_id
-    interface    = "scsi1"
-    size         = 10
-  }
 
   # net0: 관리망 (vmbr0, VLAN40, 1G)
   network_device {
