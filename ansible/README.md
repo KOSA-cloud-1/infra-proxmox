@@ -31,6 +31,7 @@ API VIP는 관리망에 있고, 노드 간 Kubernetes/Calico 통신은 `node_ip`
 | `playbook/initialize.yml` | 기존 클러스터 상태 초기화 (패키지 유지) |
 | `playbook/reset.yml` | 클러스터 완전 초기화 (패키지 포함 제거) |
 | `playbook/reset-kube-vip.yml` | control-plane만 초기화 |
+| `playbook/05_post_join_kube_vip.yml` | control-plane join 이후 kube-vip static pod manifest 설치/복구 |
 | `playbook/07_install_helm.yml` | cp1 노드에 Helm CLI 설치 |
 
 `inventory.ini`는 SSH key 경로와 실제 IP가 들어가므로 git에 포함하지 않습니다.
@@ -104,8 +105,9 @@ ansible-playbook playbook.yml
 4. containerd, kubelet, kubeadm, kubectl 설치 (전체 노드)
 5. kube-vip manifest 생성 및 cp1 kubeadm init
 6. cp2, cp3 control-plane join → worker join
-7. Calico CNI 설치
-8. Helm CLI 설치 (cp1)
+7. control-plane 전체에 kube-vip manifest 설치/복구
+8. Calico CNI 설치
+9. Helm CLI 설치 (cp1)
 
 ## 완료 후 확인
 
@@ -134,3 +136,25 @@ ansible cp1 -b -m command -a 'helm version --short'
 - VIP는 외부 API 접근용이고, Calico는 클러스터 내부 Kubernetes service endpoint를 사용합니다.
 - worker kubeconfig는 조회 전용입니다. 리소스 생성, 수정, 삭제는 control-plane의 관리자 kubeconfig로 수행합니다.
 - playbook은 반복 실행 가능하도록 구성했지만, 클러스터 구조를 바꾸는 변경은 초기화 후 재실행하는 편이 단순합니다.
+
+## kube-vip 장애 확인 / 복구
+
+VIP는 control-plane 중 한 대의 `vip_interface`에만 붙어야 합니다.
+
+```bash
+ansible kube_vip -b -m shell -a 'hostname; ip -br addr show eth0 | grep -F "172.17.130.10/32" || true'
+ansible kube_vip -b -m shell -a 'hostname; crictl ps -a --name kube-vip'
+ansible cp1 -b -m command -a 'kubectl --kubeconfig=/etc/kubernetes/admin.conf --server=https://172.17.130.10:6443 --request-timeout=10s get --raw=/readyz'
+```
+
+cp1 장애 중에 VIP가 cp2/cp3로 넘어오지 않으면, 살아있는 control-plane에 kube-vip manifest가 있는지 확인합니다.
+
+```bash
+ansible 'cp2:cp3' -b -m shell -a 'hostname; ls -l /etc/kubernetes/manifests/kube-vip.yaml 2>/dev/null || true; crictl ps -a --name kube-vip'
+```
+
+누락되어 있으면 살아있는 control-plane만 대상으로 복구합니다.
+
+```bash
+ansible-playbook playbook/05_post_join_kube_vip.yml --limit 'cp2:cp3'
+```
