@@ -1,0 +1,303 @@
+---
+# =========================================================
+# Roll back k8s-manifests bootstrap/deploy on cp1
+#
+# 기본 롤백:
+#   ansible-playbook playbook/08_rollback_deploy_k8s.yml
+#
+# cp1 checkout까지 삭제:
+#   ansible-playbook playbook/08_rollback_deploy_k8s.yml \
+#     -e rollback_delete_checkout=true
+#
+# data/monitoring 네임스페이스까지 삭제하는 깊은 정리:
+#   ansible-playbook playbook/08_rollback_deploy_k8s.yml \
+#     -e rollback_delete_data_namespaces=true \
+#     -e rollback_delete_persistent_volumes=true
+#
+# 주의:
+# - AWS Secrets Manager 값은 삭제하지 않습니다.
+# - 기본값은 Galera/monitoring PVC와 PV를 보존합니다.
+# =========================================================
+
+- name: Roll back k8s-manifests deployment on cp1
+  hosts: cp1
+  become: true
+
+  vars:
+    k8s_manifests_dest: "/home/kosa/k8s-manifests"
+    kubeconfig_path: "/home/kosa/.kube/config"
+
+    rollback_delete_bootstrap_namespaces: true
+    rollback_delete_workload_namespaces: true
+    rollback_delete_data_namespaces: false
+    rollback_delete_persistent_volumes: false
+    rollback_delete_operator_crds: false
+    rollback_delete_checkout: false
+
+    rollback_bootstrap_namespaces:
+      - argocd
+      - external-secrets
+      - ceph-csi-rbd
+      - ingress-nginx
+      - metallb-system
+
+    rollback_workload_namespaces:
+      - apps
+      - backup
+
+    rollback_data_namespaces:
+      - data
+      - monitoring
+
+    rollback_helm_releases:
+      - { name: kube-prometheus-stack, namespace: monitoring }
+      - { name: loki, namespace: monitoring }
+      - { name: promtail, namespace: monitoring }
+      - { name: ingress-nginx, namespace: ingress-nginx }
+      - { name: ceph-csi-rbd, namespace: ceph-csi-rbd }
+      - { name: external-secrets, namespace: external-secrets }
+      - { name: metallb, namespace: metallb-system }
+
+    rollback_persistent_volume_claims:
+      - { namespace: data, name: data-galera-0 }
+      - { namespace: data, name: data-galera-1 }
+      - { namespace: data, name: data-galera-2 }
+      - { namespace: monitoring, name: grafana-storage }
+
+    rollback_persistent_volumes:
+      - monitoring-prometheus-pv
+      - monitoring-alertmanager-pv
+      - monitoring-grafana-pv
+      - monitoring-loki-pv
+
+    k8s_env:
+      HOME: /home/kosa
+      KUBECONFIG: "{{ kubeconfig_path }}"
+      PATH: /usr/local/bin:/usr/bin:/bin:/snap/bin
+
+  tasks:
+    # =========================================================
+    # 사전 검증
+    # =========================================================
+    - name: Check kubeconfig exists on cp1
+      stat:
+        path: "{{ kubeconfig_path }}"
+      register: kubeconfig_stat
+
+    - name: Fail if kubeconfig not found on cp1
+      fail:
+        msg: "kubeconfig not found: {{ kubeconfig_path }}"
+      when: not kubeconfig_stat.stat.exists
+
+    - name: Verify kubectl is available
+      command: kubectl version --client=true
+      environment: "{{ k8s_env }}"
+      become_user: kosa
+      changed_when: false
+
+    - name: Verify helm is available
+      command: helm version --short
+      environment: "{{ k8s_env }}"
+      become_user: kosa
+      register: helm_version
+      failed_when: false
+      changed_when: false
+
+    - name: Warn if helm is unavailable
+      debug:
+        msg: "helm is not available; Helm release uninstall steps will be skipped."
+      when: helm_version.rc != 0
+
+    # =========================================================
+    # ArgoCD app-of-apps 정리
+    # =========================================================
+    - name: Check ArgoCD Application CRD exists
+      command: kubectl get crd applications.argoproj.io
+      environment: "{{ k8s_env }}"
+      become_user: kosa
+      register: argocd_application_crd
+      failed_when: false
+      changed_when: false
+
+    - name: Delete ArgoCD Applications and allow normal pruning
+      command: >
+        kubectl -n argocd delete applications.argoproj.io --all
+        --ignore-not-found --timeout=180s
+      environment: "{{ k8s_env }}"
+      become_user: kosa
+      register: argocd_app_delete
+      failed_when: false
+      changed_when: argocd_app_delete.rc == 0
+      when: argocd_application_crd.rc == 0
+
+    - name: Remove stuck ArgoCD Application finalizers
+      shell: >
+        kubectl -n argocd patch applications.argoproj.io --all --type=merge
+        -p '{"metadata":{"finalizers":[]}}'
+      args:
+        executable: /bin/bash
+      environment: "{{ k8s_env }}"
+      become_user: kosa
+      register: argocd_app_finalizers
+      failed_when: false
+      changed_when: argocd_app_finalizers.rc == 0
+      when: argocd_application_crd.rc == 0
+
+    - name: Delete ArgoCD Applications after finalizer cleanup
+      command: >
+        kubectl -n argocd delete applications.argoproj.io --all
+        --ignore-not-found --timeout=60s
+      environment: "{{ k8s_env }}"
+      become_user: kosa
+      register: argocd_app_delete_after_patch
+      failed_when: false
+      changed_when: argocd_app_delete_after_patch.rc == 0
+      when: argocd_application_crd.rc == 0
+
+    # =========================================================
+    # Helm release 정리
+    # =========================================================
+    - name: Uninstall Helm releases created by deploy/GitOps
+      command: >
+        helm uninstall {{ item.name }}
+        --namespace {{ item.namespace }}
+        --wait --timeout 5m
+      environment: "{{ k8s_env }}"
+      become_user: kosa
+      loop: "{{ rollback_helm_releases }}"
+      register: helm_uninstall
+      failed_when: false
+      changed_when: helm_uninstall.rc == 0
+      when: helm_version.rc == 0
+
+    # =========================================================
+    # Cluster-scoped 리소스 정리
+    # =========================================================
+    - name: Delete ExternalSecret and ClusterSecretStore resources
+      command: >
+        kubectl delete externalsecret --all --all-namespaces
+        --ignore-not-found --timeout=60s
+      environment: "{{ k8s_env }}"
+      become_user: kosa
+      register: externalsecret_delete
+      failed_when: false
+      changed_when: externalsecret_delete.rc == 0
+
+    - name: Delete ClusterSecretStore
+      command: >
+        kubectl delete clustersecretstore aws-secretsmanager
+        --ignore-not-found --timeout=60s
+      environment: "{{ k8s_env }}"
+      become_user: kosa
+      register: clustersecretstore_delete
+      failed_when: false
+      changed_when: clustersecretstore_delete.rc == 0
+
+    - name: Delete non-data StorageClasses
+      command: kubectl delete storageclass {{ item }} --ignore-not-found
+      environment: "{{ k8s_env }}"
+      become_user: kosa
+      loop:
+        - ceph-rbd
+      register: storageclass_delete
+      failed_when: false
+      changed_when: storageclass_delete.rc == 0
+
+    - name: Delete monitoring StorageClass when data namespaces are being removed
+      command: kubectl delete storageclass monitoring-local --ignore-not-found
+      environment: "{{ k8s_env }}"
+      become_user: kosa
+      register: monitoring_storageclass_delete
+      failed_when: false
+      changed_when: monitoring_storageclass_delete.rc == 0
+      when: rollback_delete_data_namespaces | bool
+
+    - name: Delete operator CRDs if explicitly requested
+      command: kubectl delete crd {{ item }} --ignore-not-found --timeout=60s
+      environment: "{{ k8s_env }}"
+      become_user: kosa
+      loop:
+        - applications.argoproj.io
+        - applicationsets.argoproj.io
+        - appprojects.argoproj.io
+        - clustersecretstores.external-secrets.io
+        - externalsecrets.external-secrets.io
+        - secretstores.external-secrets.io
+        - ipaddresspools.metallb.io
+        - l2advertisements.metallb.io
+      register: crd_delete
+      failed_when: false
+      changed_when: crd_delete.rc == 0
+      when: rollback_delete_operator_crds | bool
+
+    # =========================================================
+    # Namespace 정리
+    # =========================================================
+    - name: Delete bootstrap namespaces
+      command: kubectl delete namespace {{ item }} --ignore-not-found --timeout=5m
+      environment: "{{ k8s_env }}"
+      become_user: kosa
+      loop: "{{ rollback_bootstrap_namespaces }}"
+      register: bootstrap_namespace_delete
+      failed_when: false
+      changed_when: bootstrap_namespace_delete.rc == 0
+      when: rollback_delete_bootstrap_namespaces | bool
+
+    - name: Delete workload namespaces
+      command: kubectl delete namespace {{ item }} --ignore-not-found --timeout=5m
+      environment: "{{ k8s_env }}"
+      become_user: kosa
+      loop: "{{ rollback_workload_namespaces }}"
+      register: workload_namespace_delete
+      failed_when: false
+      changed_when: workload_namespace_delete.rc == 0
+      when: rollback_delete_workload_namespaces | bool
+
+    - name: Delete data namespaces only when explicitly requested
+      command: kubectl delete namespace {{ item }} --ignore-not-found --timeout=5m
+      environment: "{{ k8s_env }}"
+      become_user: kosa
+      loop: "{{ rollback_data_namespaces }}"
+      register: data_namespace_delete
+      failed_when: false
+      changed_when: data_namespace_delete.rc == 0
+      when: rollback_delete_data_namespaces | bool
+
+    # =========================================================
+    # PVC/PV 및 checkout 정리
+    # =========================================================
+    - name: Delete PVCs only when explicitly requested
+      command: >
+        kubectl -n {{ item.namespace }} delete pvc {{ item.name }}
+        --ignore-not-found --timeout=60s
+      environment: "{{ k8s_env }}"
+      become_user: kosa
+      loop: "{{ rollback_persistent_volume_claims }}"
+      register: pvc_delete
+      failed_when: false
+      changed_when: pvc_delete.rc == 0
+      when: rollback_delete_persistent_volumes | bool
+
+    - name: Delete static monitoring PVs only when explicitly requested
+      command: kubectl delete pv {{ item }} --ignore-not-found --timeout=60s
+      environment: "{{ k8s_env }}"
+      become_user: kosa
+      loop: "{{ rollback_persistent_volumes }}"
+      register: pv_delete
+      failed_when: false
+      changed_when: pv_delete.rc == 0
+      when: rollback_delete_persistent_volumes | bool
+
+    - name: Delete cp1 k8s-manifests checkout only when explicitly requested
+      file:
+        path: "{{ k8s_manifests_dest }}"
+        state: absent
+      when: rollback_delete_checkout | bool
+
+    - name: Print rollback summary
+      debug:
+        msg:
+          - "Rollback finished."
+          - "AWS Secrets Manager values were not deleted."
+          - "data/monitoring namespaces were preserved unless rollback_delete_data_namespaces=true."
+          - "PVC/PV resources were preserved unless rollback_delete_persistent_volumes=true."

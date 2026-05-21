@@ -163,13 +163,46 @@ ansible-playbook playbook/08_deploy_k8s.yml \
   -e alertmanager_src=/path/to/alertmanager-config.yaml
 ```
 
+기본으로 `dev` 브랜치를 배포합니다. 다른 브랜치를 배포하려면:
+
+```bash
+ansible-playbook playbook/08_deploy_k8s.yml \
+  -e k8s_manifests_version=main
+```
+
 플레이북이 수행하는 작업:
 
-1. cp1에 `https://github.com/KOSA-cloud-1/k8s-manifests.git` clone (이미 있으면 pull)
+1. cp1에 `https://github.com/KOSA-cloud-1/k8s-manifests.git` clone (기본 `dev`, 이미 있으면 pull)
 2. `secrets.env` → `/home/kosa/k8s-manifests/external-secrets/secrets.env` 복사
 3. `alertmanager-config.yaml` → `/home/kosa/k8s-manifests/monitoring/alertmanager-config.yaml` 복사
 4. `secrets.env` 내 `ALERTMANAGER_CONFIG_FILE` 경로를 cp1 기준으로 자동 수정
 5. `bash deploy.sh` 실행 (kosa 사용자, kubeconfig `/home/kosa/.kube/config`)
+
+### 배포 롤백
+
+`08_deploy_k8s.yml` 실행 중 실패했거나 bootstrap 결과를 걷어내야 하면 롤백 플레이북을 실행합니다.
+
+```bash
+ansible-playbook playbook/08_rollback_deploy_k8s.yml
+```
+
+기본 롤백은 ArgoCD Application, 관련 Helm release, bootstrap/workload namespace를 정리합니다.
+AWS Secrets Manager 값, `data`/`monitoring` namespace, PVC/PV, cp1 checkout은 기본적으로 보존합니다.
+
+cp1의 `/home/kosa/k8s-manifests` checkout까지 삭제하려면:
+
+```bash
+ansible-playbook playbook/08_rollback_deploy_k8s.yml \
+  -e rollback_delete_checkout=true
+```
+
+Galera/monitoring 데이터까지 포함해 깊게 정리해야 할 때만 아래 옵션을 사용합니다.
+
+```bash
+ansible-playbook playbook/08_rollback_deploy_k8s.yml \
+  -e rollback_delete_data_namespaces=true \
+  -e rollback_delete_persistent_volumes=true
+```
 
 ---
 

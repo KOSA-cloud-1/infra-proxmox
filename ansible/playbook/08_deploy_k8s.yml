@@ -13,6 +13,10 @@
 #   ansible-playbook playbook/08_deploy_k8s.yml \
 #     -e secrets_env_src=/path/to/secrets.env \
 #     -e alertmanager_src=/path/to/alertmanager-config.yaml
+#
+# 브랜치 재정의:
+#   ansible-playbook playbook/08_deploy_k8s.yml \
+#     -e k8s_manifests_version=main
 # =========================================================
 
 - name: Clone and deploy k8s-manifests on cp1
@@ -21,6 +25,7 @@
 
   vars:
     k8s_manifests_repo: "https://github.com/KOSA-cloud-1/k8s-manifests.git"
+    k8s_manifests_version: dev
     k8s_manifests_dest: "/home/kosa/k8s-manifests"
     secrets_env_src: "{{ playbook_dir }}/../secrets.env"
     alertmanager_src: "{{ playbook_dir }}/../alertmanager-config.yaml"
@@ -61,7 +66,7 @@
       git:
         repo: "{{ k8s_manifests_repo }}"
         dest: "{{ k8s_manifests_dest }}"
-        version: main
+        version: "{{ k8s_manifests_version }}"
         force: false
         update: true
       become_user: kosa
@@ -76,6 +81,7 @@
         owner: kosa
         group: kosa
         mode: '0600'
+      no_log: "{{ hide_join_secrets | default(true) | bool }}"
 
     - name: Copy alertmanager-config.yaml to cp1
       copy:
@@ -85,6 +91,7 @@
         group: kosa
         mode: '0600'
       when: alertmanager_stat.stat.exists
+      no_log: "{{ hide_join_secrets | default(true) | bool }}"
 
     - name: Set ALERTMANAGER_CONFIG_FILE to cp1 path in secrets.env
       lineinfile:
@@ -92,6 +99,7 @@
         regexp: '^ALERTMANAGER_CONFIG_FILE='
         line: "ALERTMANAGER_CONFIG_FILE={{ k8s_manifests_dest }}/monitoring/alertmanager-config.yaml"
       when: alertmanager_stat.stat.exists
+      no_log: "{{ hide_join_secrets | default(true) | bool }}"
 
     # =========================================================
     # deploy.sh 실행
