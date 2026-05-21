@@ -11,8 +11,6 @@ kube_minor_version: "{{ kube_version.split('.')[:2] | join('.') }}"
 kubernetes_apt_version: "1.30.1-1.1"
 kube_vip_version: "v0.8.0"
 
-etcd_disk: /dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi1
-etcd_disk_mount: /mnt/etcd
 etcd_mount: /var/lib/etcd
 
 hide_join_secrets: false
