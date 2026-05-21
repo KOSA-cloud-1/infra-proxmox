@@ -56,12 +56,12 @@ ansible-playbook playbook.yml
 
 Ansible은 다음 작업을 수행합니다.
 
-1. control-plane etcd 디스크 준비
-2. hostname, `/etc/hosts`, 공통 패키지 설정
-3. containerd, kubelet, kubeadm, kubectl 설치
-4. kube-vip 기반 Kubernetes API VIP 구성
-5. control-plane / worker join
-6. Calico CNI 설치
+1. hostname, `/etc/hosts`, 공통 패키지 설정
+2. containerd, kubelet, kubeadm, kubectl 설치
+3. kube-vip 기반 Kubernetes API VIP 구성 (cp1 init → cp2,cp3 join 후 적용)
+4. control-plane / worker join
+5. Calico CNI 설치
+6. Helm CLI 설치 및 kubectl/kubeadm bash 자동완성 설정
 
 자세한 내용은 `ansible/README.md`를 참고합니다.
 

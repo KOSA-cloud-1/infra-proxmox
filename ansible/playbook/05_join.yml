@@ -33,7 +33,7 @@
     - name: Set join facts
       set_fact:
         worker_join_cmd: "{{ worker_join.stdout | trim }}"
-        cert_key: "{{ cert_key_raw.stdout_lines[-1] | trim }}"
+        cert_key: "{{ cert_key_raw.stdout | regex_search('[0-9a-f]{64}') }}"
       no_log: "{{ hide_join_secrets | default(true) | bool }}"
 
     - name: Ensure local files directory exists

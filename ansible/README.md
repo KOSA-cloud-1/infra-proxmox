@@ -26,7 +26,7 @@ API VIP는 관리망에 있고, 노드 간 Kubernetes/Calico 통신은 `node_ip`
 | --- | --- |
 | `inventory.ini` | 실제 VM 접속 주소와 Kubernetes node IP 정의 |
 | `inventory.ini.example` | inventory 작성 예시 |
-| `group_vars/all.yml` | VIP, NIC, CIDR, etcd 디스크 경로, Kubernetes 버전 등 공통 변수 |
+| `group_vars/all.yml` | VIP, NIC, CIDR, Kubernetes 버전 등 공통 변수 |
 | `playbook.yml` | 클러스터 구성 진입점 |
 | `playbook/initialize.yml` | 기존 클러스터 상태 초기화 (패키지 유지) |
 | `playbook/reset.yml` | 클러스터 완전 초기화 (패키지 포함 제거) |
@@ -99,15 +99,14 @@ ansible-playbook playbook.yml
 
 실행 흐름은 다음 순서입니다.
 
-1. etcd 전용 로컬 디스크 마운트 (control-plane)
-2. hostname 및 `/etc/hosts` 설정 (전체 노드)
-3. apt 사전 작업 (전체 노드)
-4. containerd, kubelet, kubeadm, kubectl 설치 (전체 노드)
-5. kube-vip manifest 생성 및 cp1 kubeadm init
-6. cp2, cp3 control-plane join → worker join
-7. control-plane 전체에 kube-vip manifest 설치/복구
-8. Calico CNI 설치
-9. Helm CLI 설치 (cp1)
+1. hostname 및 `/etc/hosts` 설정 (전체 노드)
+2. apt 사전 작업 (전체 노드)
+3. containerd, kubelet, kubeadm, kubectl 설치 (전체 노드) + kubectl/kubeadm bash 자동완성 (control-plane)
+4. kube-vip manifest 사전 생성 및 cp1 kubeadm init
+5. cp2, cp3 control-plane join → worker join
+6. control-plane 전체에 kube-vip manifest 설치/복구 (join 이후)
+7. Calico CNI 설치
+8. Helm CLI 설치 (cp1)
 
 ## 완료 후 확인
 
