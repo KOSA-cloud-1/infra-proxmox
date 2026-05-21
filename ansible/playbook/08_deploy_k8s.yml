@@ -102,6 +102,20 @@
       no_log: "{{ hide_join_secrets | default(true) | bool }}"
 
     # =========================================================
+    # deploy.sh 의존 CLI 설치
+    # =========================================================
+    - name: Install AWS CLI for deploy.sh
+      apt:
+        name: awscli
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+      register: awscli_apt_result
+      retries: 5
+      delay: 10
+      until: awscli_apt_result is succeeded
+
+    # =========================================================
     # deploy.sh 실행
     # =========================================================
     - name: Run deploy.sh

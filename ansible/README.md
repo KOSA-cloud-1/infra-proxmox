@@ -33,6 +33,8 @@ API VIP는 관리망에 있고, 노드 간 Kubernetes/Calico 통신은 `node_ip`
 | `playbook/reset-kube-vip.yml` | control-plane만 초기화 |
 | `playbook/05_post_join_kube_vip.yml` | control-plane join 이후 kube-vip static pod manifest 설치/복구 |
 | `playbook/07_install_helm.yml` | cp1 노드에 Helm CLI 설치 |
+| `playbook/09_prepare_monitoring_storage.yml` | monitoring local PV 디렉터리 생성 |
+| `playbook/10_enable_metallb_loadbalancers.yml` | MetalLB 준비 후 NodePort 서비스를 LoadBalancer로 전환 |
 
 `inventory.ini`는 SSH key 경로와 실제 IP가 들어가므로 git에 포함하지 않습니다.
 `admin.conf` 같은 kubeconfig는 클러스터 관리자 인증 정보이므로 git에 포함하지 않습니다.
@@ -131,6 +133,19 @@ ansible cp1 -b -m command -a 'helm version --short'
 
 클러스터 구성이 완료된 후 cp1에 k8s-manifests를 clone하고 `deploy.sh`를 실행합니다.
 
+monitoring local PV를 사용할 경우 배포 전에 monitoring 노드의 디렉터리를 먼저 준비합니다.
+
+```bash
+ansible-playbook playbook/09_prepare_monitoring_storage.yml
+```
+
+기본 대상은 `worker7`입니다. 다른 노드를 monitoring 노드로 쓸 때는:
+
+```bash
+ansible-playbook playbook/09_prepare_monitoring_storage.yml \
+  -e monitoring_storage_host=<node-name>
+```
+
 ### 사전 준비
 
 `deploy.sh`가 필요로 하는 gitignore된 파일을 `ansible/files/`에 복사해 둡니다.
@@ -177,6 +192,27 @@ ansible-playbook playbook/08_deploy_k8s.yml \
 3. `alertmanager-config.yaml` → `/home/kosa/k8s-manifests/monitoring/alertmanager-config.yaml` 복사
 4. `secrets.env` 내 `ALERTMANAGER_CONFIG_FILE` 경로를 cp1 기준으로 자동 수정
 5. `bash deploy.sh` 실행 (kosa 사용자, kubeconfig `/home/kosa/.kube/config`)
+
+## MetalLB LoadBalancer 전환 (10_enable_metallb_loadbalancers.yml)
+
+초기 bootstrap은 `NodePort`로 시작합니다. MetalLB와 `infra/metallb-config.yaml`이 정상 반영된 뒤,
+아래 플레이북으로 외부 노출 서비스를 `LoadBalancer`로 전환합니다.
+
+```bash
+ansible-playbook playbook/10_enable_metallb_loadbalancers.yml
+```
+
+기본 IP 배정은 다음과 같습니다.
+
+| 서비스 | IP |
+| --- | --- |
+| `ingress-nginx/ingress-nginx-controller` | `172.17.128.240` |
+| `argocd/argocd-server` | `172.17.128.241` |
+| `monitoring/kube-prometheus-stack-grafana` | `172.17.128.242` |
+
+이 플레이북은 MetalLB controller/speaker rollout, `IPAddressPool`, `L2Advertisement`를 확인한 뒤
+대상 Service를 patch합니다. ArgoCD self-heal이 켜져 있으므로 장기적으로 유지하려면
+`k8s-manifests`의 대응 manifest도 `LoadBalancer` 상태로 커밋해 둡니다.
 
 ### 배포 롤백
 

@@ -248,13 +248,20 @@
     # - init 전에 배치하면 kube-vip가 API server 없이 leader election을
     #   시도하다가 bootstrap VIP를 건드려 API server 기동 실패
     # =====================================================
-    - name: Create kube-vip local kubeconfig pointing to cp1's own API server
-      shell: |
-        sed 's|server: https://.*:6443|server: https://{{ node_ip | default(ansible_host) }}:6443|' \
-          /etc/kubernetes/admin.conf > /etc/kubernetes/kube-vip-local.conf
-        chmod 0600 /etc/kubernetes/kube-vip-local.conf
-      args:
-        executable: /bin/bash
+    - name: Copy admin.conf to kube-vip local kubeconfig
+      copy:
+        src: /etc/kubernetes/admin.conf
+        dest: /etc/kubernetes/kube-vip-local.conf
+        remote_src: true
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Point kube-vip kubeconfig to cp1's own API server
+      replace:
+        path: /etc/kubernetes/kube-vip-local.conf
+        regexp: 'server: https://.*:6443'
+        replace: 'server: https://{{ node_ip }}:6443'
 
     - name: Install kube-vip manifest after RBAC is ready
       copy:

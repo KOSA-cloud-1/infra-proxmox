@@ -1,0 +1,148 @@
+---
+# =========================================================
+# Switch bootstrap NodePort services to MetalLB LoadBalancer.
+#
+# Run after MetalLB and k8s-manifests are deployed:
+#   ansible-playbook playbook/10_enable_metallb_loadbalancers.yml
+#
+# Default IP assignment:
+#   ingress-nginx: 172.17.128.240
+#   argocd-server: 172.17.128.241
+#   grafana:       172.17.128.242
+#
+# Note:
+#   This patches the live Services. If ArgoCD desired manifests still declare
+#   NodePort, commit the matching LoadBalancer changes to k8s-manifests as well
+#   so self-heal does not roll them back later.
+# =========================================================
+
+- name: Enable MetalLB LoadBalancer services
+  hosts: cp1
+  become: true
+  gather_facts: false
+
+  vars:
+    kubeconfig_path: /home/kosa/.kube/config
+    metallb_namespace: metallb-system
+    metallb_ip_pool_name: first-pool
+    metallb_l2advertisement_name: example
+    metallb_wait_timeout: 300s
+
+    loadbalancer_services:
+      - namespace: ingress-nginx
+        name: ingress-nginx-controller
+        ip: 172.17.128.240
+      - namespace: argocd
+        name: argocd-server
+        ip: 172.17.128.241
+      - namespace: monitoring
+        name: kube-prometheus-stack-grafana
+        ip: 172.17.128.242
+
+    k8s_env:
+      HOME: /home/kosa
+      KUBECONFIG: "{{ kubeconfig_path }}"
+      PATH: /usr/local/bin:/usr/bin:/bin:/snap/bin
+
+  tasks:
+    - name: Check kubeconfig exists on cp1
+      stat:
+        path: "{{ kubeconfig_path }}"
+      register: kubeconfig_stat
+
+    - name: Fail if kubeconfig not found on cp1
+      fail:
+        msg: "kubeconfig not found: {{ kubeconfig_path }}"
+      when: not kubeconfig_stat.stat.exists
+
+    - name: Verify kubectl is available
+      command: kubectl version --client=true
+      environment: "{{ k8s_env }}"
+      become_user: kosa
+      changed_when: false
+
+    - name: Wait for MetalLB controller deployment
+      command: >
+        kubectl -n {{ metallb_namespace }}
+        rollout status deployment
+        -l app.kubernetes.io/name=metallb,app.kubernetes.io/component=controller
+        --timeout={{ metallb_wait_timeout }}
+      environment: "{{ k8s_env }}"
+      become_user: kosa
+      changed_when: false
+
+    - name: Wait for MetalLB speaker daemonset
+      command: >
+        kubectl -n {{ metallb_namespace }}
+        rollout status daemonset
+        -l app.kubernetes.io/name=metallb,app.kubernetes.io/component=speaker
+        --timeout={{ metallb_wait_timeout }}
+      environment: "{{ k8s_env }}"
+      become_user: kosa
+      changed_when: false
+
+    - name: Verify MetalLB IPAddressPool exists
+      command: >
+        kubectl -n {{ metallb_namespace }}
+        get ipaddresspools.metallb.io {{ metallb_ip_pool_name }}
+      environment: "{{ k8s_env }}"
+      become_user: kosa
+      changed_when: false
+
+    - name: Verify MetalLB L2Advertisement exists
+      command: >
+        kubectl -n {{ metallb_namespace }}
+        get l2advertisements.metallb.io {{ metallb_l2advertisement_name }}
+      environment: "{{ k8s_env }}"
+      become_user: kosa
+      changed_when: false
+
+    - name: Patch Services to LoadBalancer with static MetalLB IPs
+      command:
+        argv:
+          - kubectl
+          - -n
+          - "{{ item.namespace }}"
+          - patch
+          - service
+          - "{{ item.name }}"
+          - --type=merge
+          - -p
+          - "{{ {'metadata': {'annotations': {'metallb.io/loadBalancerIPs': item.ip}}, 'spec': {'type': 'LoadBalancer', 'loadBalancerIP': item.ip}} | to_json }}"
+      environment: "{{ k8s_env }}"
+      become_user: kosa
+      loop: "{{ loadbalancer_services }}"
+      register: loadbalancer_patch
+      changed_when: "'patched' in loadbalancer_patch.stdout"
+
+    - name: Wait for LoadBalancer IP assignment
+      command:
+        argv:
+          - kubectl
+          - -n
+          - "{{ item.namespace }}"
+          - get
+          - service
+          - "{{ item.name }}"
+          - -o
+          - "jsonpath={.status.loadBalancer.ingress[0].ip}"
+      environment: "{{ k8s_env }}"
+      become_user: kosa
+      loop: "{{ loadbalancer_services }}"
+      register: loadbalancer_ip
+      changed_when: false
+      retries: 30
+      delay: 5
+      until: loadbalancer_ip.stdout == item.ip
+
+    - name: Show LoadBalancer services
+      command: kubectl -n {{ item.namespace }} get service {{ item.name }} -o wide
+      environment: "{{ k8s_env }}"
+      become_user: kosa
+      loop: "{{ loadbalancer_services }}"
+      register: loadbalancer_services_status
+      changed_when: false
+
+    - name: Print LoadBalancer service status
+      debug:
+        msg: "{{ loadbalancer_services_status.results | map(attribute='stdout_lines') | list }}"
