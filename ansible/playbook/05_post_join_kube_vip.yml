@@ -21,35 +21,27 @@
       until: local_api_ready.rc == 0
       changed_when: false
 
+    - name: Copy kube-vip RBAC manifest to remote
+      copy:
+        src: ../files/kube-vip-rbac.yaml
+        dest: /tmp/kube-vip-rbac.yaml
+        mode: '0644'
+      run_once: true
+
     - name: Ensure kube-vip lease RBAC exists
       shell: |
         kubectl --kubeconfig=/etc/kubernetes/admin.conf \
           --server=https://{{ node_ip | default(ansible_host) }}:6443 \
-          --request-timeout=10s apply -f - <<'EOF'
-        apiVersion: rbac.authorization.k8s.io/v1
-        kind: ClusterRole
-        metadata:
-          name: kube-vip-lease-manager
-        rules:
-          - apiGroups: ["coordination.k8s.io"]
-            resources: ["leases"]
-            verbs: ["get", "list", "watch", "create", "update", "patch"]
-        ---
-        apiVersion: rbac.authorization.k8s.io/v1
-        kind: ClusterRoleBinding
-        metadata:
-          name: kube-vip-lease-manager
-        subjects:
-          - kind: User
-            name: kubernetes-admin
-            apiGroup: rbac.authorization.k8s.io
-        roleRef:
-          kind: ClusterRole
-          name: kube-vip-lease-manager
-          apiGroup: rbac.authorization.k8s.io
-        EOF
+          --request-timeout=10s \
+          apply -f /tmp/kube-vip-rbac.yaml
       args:
         executable: /bin/bash
+      run_once: true
+
+    - name: Remove kube-vip RBAC temp file
+      file:
+        path: /tmp/kube-vip-rbac.yaml
+        state: absent
       run_once: true
 
     - name: Check Kubernetes API through VIP before repair

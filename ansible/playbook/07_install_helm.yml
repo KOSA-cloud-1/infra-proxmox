@@ -8,31 +8,8 @@
   become: true
 
   tasks:
-    # =====================================================
-    # Helm APT 설치에 필요한 패키지 준비
-    # =====================================================
-    - name: Install Helm apt dependencies
-      apt:
-        name:
-          - apt-transport-https
-          - ca-certificates
-          - curl
-          - gpg
-        state: present
-        update_cache: yes
-      register: helm_dependencies_apt_result
-      retries: 5
-      delay: 10
-      until: helm_dependencies_apt_result is succeeded
-
-    # =====================================================
-    # APT keyring 디렉터리 생성
-    # =====================================================
-    - name: Create keyrings directory
-      file:
-        path: /etc/apt/keyrings
-        state: directory
-        mode: '0755'
+    # apt-transport-https, ca-certificates, curl, gpg 및 /etc/apt/keyrings 디렉터리는
+    # 03_common.yml에서 이미 처리됨
 
     # =====================================================
     # Helm APT GPG key 다운로드

@@ -85,45 +85,6 @@
         grep /var/lib/kubelet /proc/self/mountinfo | awk '{print $5}' | sort -r | xargs -r umount -lf
       ignore_errors: yes
 
-    # CP 노드만 etcd 디스크가 마운트되어 있음
-    - name: Clear etcd data directory contents before unmounting
-      shell: find /var/lib/etcd -mindepth 1 -delete 2>/dev/null || true
-      when: inventory_hostname in groups['control_plane']
-      ignore_errors: yes
-
-    - name: unmount etcd disk
-      mount:
-        path: /var/lib/etcd
-        state: unmounted
-      ignore_errors: yes
-      when: inventory_hostname in groups['control_plane']
-
-    - name: remove etcd from fstab
-      mount:
-        path: /var/lib/etcd
-        state: absent
-      ignore_errors: yes
-      when: inventory_hostname in groups['control_plane']
-
-    # =====================================================
-    - name: Unmount etcd disk before format
-      shell: umount {{ etcd_mount }} 2>/dev/null || true
-      when: inventory_hostname in groups['control_plane']
-      ignore_errors: yes
-
-    - name: Format etcd disk
-      command: mkfs.ext4 -F {{ etcd_disk }}
-      when: inventory_hostname in groups['control_plane']
-      ignore_errors: yes
-
-    - name: Mount etcd disk temporarily to remove lost+found
-      shell: |
-        mount {{ etcd_disk }} {{ etcd_mount }} 2>/dev/null || true
-        rm -rf {{ etcd_mount }}/lost+found
-        umount {{ etcd_mount }} 2>/dev/null || true
-      when: inventory_hostname in groups['control_plane']
-      ignore_errors: yes
-
     # =====================================================
     # remove kubernetes directories
     # =====================================================

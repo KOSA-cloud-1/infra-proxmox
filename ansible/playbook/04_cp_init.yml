@@ -1,12 +1,16 @@
-- name: Install kube-vip manifest
-  hosts: kube_vip
+- name: Pre-generate kube-vip manifest for cp1
+  hosts: cp1
   become: true
 
   tasks:
     # =====================================================
-    # kube-vip static pod manifest 생성
-    # - control-plane endpoint VIP를 제공하기 위한 static pod
-    # - kubeadm init 전에 /etc/kubernetes/manifests 에 배치
+    # cp1 전용: kubeadm init 전에 kube-vip image pull +
+    # manifest를 /tmp에 미리 생성해 둠.
+    # - cp2, cp3는 kubeadm join 전에 admin.conf가 없으므로
+    #   kube-vip-local.conf를 만들 수 없음.
+    #   join 완료 후 05_post_join_kube_vip.yml 에서 처리.
+    # - cp1도 init 중에 kube-vip가 떠 있으면 bootstrap VIP를
+    #   건드려 API server 기동에 실패하므로 init 완료 후 배치.
     # =====================================================
     - name: Create manifests dir
       file:
@@ -18,41 +22,10 @@
       command: crictl pull ghcr.io/kube-vip/kube-vip:{{ kube_vip_version }}
       changed_when: false
 
-    # cp2, cp3는 init 전에 manifests에 배치 (join 전 kube-vip 참여 필요)
-    # cp1은 kubeadm init 중 kube-vip가 static pod로 떠서 leader election을
-    # 시도하면 bootstrap VIP를 건드려 API server 기동에 실패하므로
-    # init 완료 후 RBAC 적용 단계에서 manifest를 배치함
-    - name: Create kube-vip local kubeconfig pointing to node's own API server
-      shell: |
-        sed 's|server: https://.*:6443|server: https://{{ node_ip | default(ansible_host) }}:6443|' \
-          /etc/kubernetes/admin.conf > /etc/kubernetes/kube-vip-local.conf
-        chmod 0600 /etc/kubernetes/kube-vip-local.conf
-      args:
-        executable: /bin/bash
-      when: inventory_hostname != 'cp1'
-
-    - name: Generate kube-vip manifest
-      shell: |
-        ctr -n k8s.io run --rm --net-host ghcr.io/kube-vip/kube-vip:{{ kube_vip_version }} vip /kube-vip manifest pod \
-          --interface {{ vip_interface }} \
-          --address {{ vip_address }} \
-          --vipSubnet /{{ vip_cidr | default(32) }} \
-          --controlplane \
-          --arp \
-          --leaderElection \
-          --leaseDuration 15 \
-          --leaseRenewDuration 10 \
-          --leaseRetry 2 \
-          --k8sConfigPath /etc/kubernetes/kube-vip-local.conf \
-        > /etc/kubernetes/manifests/kube-vip.yaml
-      args:
-        executable: /bin/bash
-        creates: /etc/kubernetes/manifests/kube-vip.yaml
-      when: inventory_hostname != 'cp1'
-
     - name: Pre-generate kube-vip manifest for cp1 to temp location
       shell: |
-        ctr -n k8s.io run --rm --net-host ghcr.io/kube-vip/kube-vip:{{ kube_vip_version }} vip /kube-vip manifest pod \
+        container_name="vip-manifest-$$"
+        ctr -n k8s.io run --rm --net-host ghcr.io/kube-vip/kube-vip:{{ kube_vip_version }} "${container_name}" /kube-vip manifest pod \
           --interface {{ vip_interface }} \
           --address {{ vip_address }} \
           --vipSubnet /{{ vip_cidr | default(32) }} \
@@ -66,7 +39,6 @@
         > /tmp/kube-vip-manifest.yaml
       args:
         executable: /bin/bash
-      when: inventory_hostname == 'cp1'
 
 
 - name: Initialize Kubernetes Cluster
@@ -101,36 +73,19 @@
       when: remaining_k8s_ports.stdout | length > 0
 
     # =====================================================
-    # /var/lib/etcd 마운트 여부 확인
-    # - etcd를 local disk에 저장하는 구조에서는 필수 검증
-    # - /var/lib/etcd가 마운트되어 있지 않으면 즉시 실패 처리
-    # - 마운트가 안 된 상태로 init하면 etcd가 OS/Ceph 디스크에 저장될 수 있음
+    # /var/lib/etcd 디렉터리 준비
     # =====================================================
-    - name: Check etcd mount
-      command: findmnt /var/lib/etcd
-      register: etcd_mount_check
-      changed_when: false
-      failed_when: false
-
-    - name: Fail if /var/lib/etcd is not mounted
-      fail:
-        msg: |
-          /var/lib/etcd is not mounted.
-          etcd must use local disk before kubeadm init.
-
-          Expected:
-            /var/lib/etcd mounted from local disk
-
-          Check:
-            df -h /var/lib/etcd
-            findmnt /var/lib/etcd
-      when: etcd_mount_check.rc != 0
+    - name: Ensure /var/lib/etcd directory exists
+      file:
+        path: /var/lib/etcd
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
 
     # =====================================================
     # /var/lib/etcd 기존 데이터 확인
     # - 재설치 전에 기존 etcd 데이터가 남아 있으면 init 충돌 가능
-    # - /var/lib/etcd는 /mnt/etcd/data의 bind mount이므로
-    #   lost+found가 없음 → 단순하게 전체 내용 확인
     # =====================================================
     - name: Check existing etcd data
       shell: |
@@ -150,14 +105,6 @@
           Cleanup command:
             sudo rm -rf /var/lib/etcd/*
       when: existing_etcd_data.stdout | length > 0
-
-    # =====================================================
-    # /var/lib/etcd 마운트 결과 출력
-    # - 실패 조건 통과 후 실제 어떤 디스크가 마운트되었는지 확인용
-    # =====================================================
-    - name: Print etcd mount result
-      debug:
-        var: etcd_mount_check.stdout_lines
 
     # =====================================================
     # kubeadm init 전 bootstrap VIP 할당
@@ -273,35 +220,27 @@
     # =====================================================
     # kube-vip leader election 권한 부여
     # - leases 리소스 접근 권한 필요
-    # - kube-system Role이 아니라 ClusterRole/ClusterRoleBinding 사용
+    # - ClusterRole/ClusterRoleBinding 정의는 files/kube-vip-rbac.yaml 참조
     # =====================================================
+    - name: Copy kube-vip RBAC manifest to remote
+      copy:
+        src: ../files/kube-vip-rbac.yaml
+        dest: /tmp/kube-vip-rbac.yaml
+        mode: '0644'
+
     - name: Grant kube-vip lease access
       shell: |
-        kubectl --kubeconfig=/etc/kubernetes/super-admin.conf --server=https://{{ node_ip | default(ansible_host) }}:6443 --request-timeout=10s apply -f - <<'EOF'
-        apiVersion: rbac.authorization.k8s.io/v1
-        kind: ClusterRole
-        metadata:
-          name: kube-vip-lease-manager
-        rules:
-          - apiGroups: ["coordination.k8s.io"]
-            resources: ["leases"]
-            verbs: ["get", "list", "watch", "create", "update", "patch"]
-        ---
-        apiVersion: rbac.authorization.k8s.io/v1
-        kind: ClusterRoleBinding
-        metadata:
-          name: kube-vip-lease-manager
-        subjects:
-          - kind: User
-            name: kubernetes-admin
-            apiGroup: rbac.authorization.k8s.io
-        roleRef:
-          kind: ClusterRole
-          name: kube-vip-lease-manager
-          apiGroup: rbac.authorization.k8s.io
-        EOF
+        kubectl --kubeconfig=/etc/kubernetes/super-admin.conf \
+          --server=https://{{ node_ip | default(ansible_host) }}:6443 \
+          --request-timeout=10s \
+          apply -f /tmp/kube-vip-rbac.yaml
       args:
         executable: /bin/bash
+
+    - name: Remove kube-vip RBAC temp file
+      file:
+        path: /tmp/kube-vip-rbac.yaml
+        state: absent
 
     # =====================================================
     # kube-vip manifest 배치 및 기동 대기
@@ -309,13 +248,20 @@
     # - init 전에 배치하면 kube-vip가 API server 없이 leader election을
     #   시도하다가 bootstrap VIP를 건드려 API server 기동 실패
     # =====================================================
-    - name: Create kube-vip local kubeconfig pointing to cp1's own API server
-      shell: |
-        sed 's|server: https://.*:6443|server: https://{{ node_ip | default(ansible_host) }}:6443|' \
-          /etc/kubernetes/admin.conf > /etc/kubernetes/kube-vip-local.conf
-        chmod 0600 /etc/kubernetes/kube-vip-local.conf
-      args:
-        executable: /bin/bash
+    - name: Copy admin.conf to kube-vip local kubeconfig
+      copy:
+        src: /etc/kubernetes/admin.conf
+        dest: /etc/kubernetes/kube-vip-local.conf
+        remote_src: true
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Point kube-vip kubeconfig to cp1's own API server
+      replace:
+        path: /etc/kubernetes/kube-vip-local.conf
+        regexp: 'server: https://.*:6443'
+        replace: 'server: https://{{ node_ip | default(ansible_host) }}:6443'
 
     - name: Install kube-vip manifest after RBAC is ready
       copy:
@@ -348,49 +294,5 @@
       until: vip_ready.rc == 0
       changed_when: false
 
-    # =====================================================
-    # join command 생성
-    # - worker join command와 control-plane join에 필요한 certificate key 저장
-    # - 이후 join playbook에서 ../files 값을 참조
-    # =====================================================
-    - name: Get worker join command
-      command: kubeadm token create --print-join-command
-      register: worker_join
-      no_log: "{{ hide_join_secrets | default(true) | bool }}"
-
-    - name: Get certificate key
-      command: kubeadm init phase upload-certs --upload-certs
-      register: cert_key_raw
-      no_log: "{{ hide_join_secrets | default(true) | bool }}"
-
-    - name: Set join facts
-      set_fact:
-        worker_join_cmd: "{{ worker_join.stdout }}"
-        cert_key: "{{ cert_key_raw.stdout_lines[-1] }}"
-      no_log: "{{ hide_join_secrets | default(true) | bool }}"
-
-    - name: Ensure local files directory exists
-      file:
-        path: "../files"
-        state: directory
-        mode: '0700'
-      delegate_to: localhost
-      become: false
-
-    - name: Save worker join command to local file
-      copy:
-        dest: "../files/worker_join_cmd.txt"
-        content: "{{ worker_join.stdout | trim }}\n"
-        mode: '0600'
-      delegate_to: localhost
-      become: false
-      no_log: "{{ hide_join_secrets | default(true) | bool }}"
-
-    - name: Save certificate key to local file
-      copy:
-        dest: "../files/cert_key.txt"
-        content: "{{ cert_key_raw.stdout_lines[-1] | trim }}\n"
-        mode: '0600'
-      delegate_to: localhost
-      become: false
-      no_log: "{{ hide_join_secrets | default(true) | bool }}"
+    # join command 생성은 05_join.yml의 첫 번째 play에서 처리함
+    # (05_join.yml이 항상 새 token을 생성해서 files/에 저장하므로 여기서 저장 불필요)

@@ -33,7 +33,7 @@
     - name: Set join facts
       set_fact:
         worker_join_cmd: "{{ worker_join.stdout | trim }}"
-        cert_key: "{{ cert_key_raw.stdout_lines[-1] | trim }}"
+        cert_key: "{{ cert_key_raw.stdout | regex_search('[0-9a-f]{64}') }}"
       no_log: "{{ hide_join_secrets | default(true) | bool }}"
 
     - name: Ensure local files directory exists
@@ -366,13 +366,13 @@
       retries: 30
       delay: 2
       until: worker_readonly_token.stdout | length > 0
-      no_log: true
+      no_log: "{{ hide_join_secrets | default(true) | bool }}"
 
     - name: Read cluster CA
       slurp:
         src: /etc/kubernetes/pki/ca.crt
       register: worker_readonly_ca
-      no_log: true
+      no_log: "{{ hide_join_secrets | default(true) | bool }}"
 
     - name: Build worker read-only kubeconfig
       set_fact:
@@ -394,7 +394,7 @@
                 cluster: kubernetes
                 user: worker-readonly
           current-context: worker-readonly@kubernetes
-      no_log: true
+      no_log: "{{ hide_join_secrets | default(true) | bool }}"
 
 
 - name: Install worker read-only kubeconfig
@@ -419,7 +419,7 @@
         owner: kosa
         group: kosa
         mode: '0600'
-      no_log: true
+      no_log: "{{ hide_join_secrets | default(true) | bool }}"
 
     - name: Remove wrong KUBECONFIG from kosa bashrc on worker nodes
       lineinfile:
@@ -447,4 +447,4 @@
         - "../files/cert_key.txt"
       delegate_to: localhost
       become: false
-      no_log: true
+      no_log: "{{ hide_join_secrets | default(true) | bool }}"

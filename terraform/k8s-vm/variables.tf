@@ -89,7 +89,7 @@ variable "worker_datastore_id" {
 }
 
 variable "cp_datastore_id" {
-  description = "Control Plane 전용 etcd 추가 디스크 datastore"
+  description = "Control Plane OS 디스크 및 EFI 디스크 datastore"
   type        = string
   default     = "local-lvm"
 }

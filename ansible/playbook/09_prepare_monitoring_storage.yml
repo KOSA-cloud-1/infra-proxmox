@@ -1,0 +1,56 @@
+---
+# =========================================================
+# Prepare local PersistentVolume directories for monitoring.
+#
+# Run before applying k8s-manifests/monitoring/local-storage.yaml:
+#   ansible-playbook playbook/09_prepare_monitoring_storage.yml
+#
+# Override the target node if needed:
+#   ansible-playbook playbook/09_prepare_monitoring_storage.yml \
+#     -e monitoring_storage_host=<node-name>
+# =========================================================
+
+- name: Prepare monitoring local storage directories
+  hosts: "{{ monitoring_storage_host | default('worker7') }}"
+  become: true
+  gather_facts: false
+
+  vars:
+    monitoring_storage_root: /mnt/monitoring
+    monitoring_storage_mode: "0777"
+    monitoring_storage_dirs:
+      - prometheus
+      - alertmanager
+      - grafana
+      - loki
+
+  tasks:
+    - name: Create monitoring storage root
+      file:
+        path: "{{ monitoring_storage_root }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Create monitoring component directories
+      file:
+        path: "{{ monitoring_storage_root }}/{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "{{ monitoring_storage_mode }}"
+      loop: "{{ monitoring_storage_dirs }}"
+
+    - name: Show monitoring storage directory permissions
+      command: >-
+        ls -ld {{ monitoring_storage_root }}
+        {% for dir in monitoring_storage_dirs %}
+        {{ monitoring_storage_root }}/{{ dir }}
+        {% endfor %}
+      changed_when: false
+      register: monitoring_storage_ls
+
+    - name: Print monitoring storage directory permissions
+      debug:
+        msg: "{{ monitoring_storage_ls.stdout_lines }}"
