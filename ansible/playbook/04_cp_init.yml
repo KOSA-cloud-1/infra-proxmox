@@ -261,7 +261,7 @@
       replace:
         path: /etc/kubernetes/kube-vip-local.conf
         regexp: 'server: https://.*:6443'
-        replace: 'server: https://{{ node_ip }}:6443'
+        replace: 'server: https://{{ node_ip | default(ansible_host) }}:6443'
 
     - name: Install kube-vip manifest after RBAC is ready
       copy:

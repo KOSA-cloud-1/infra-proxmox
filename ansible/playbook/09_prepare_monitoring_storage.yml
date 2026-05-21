@@ -43,9 +43,11 @@
       loop: "{{ monitoring_storage_dirs }}"
 
     - name: Show monitoring storage directory permissions
-      command: >
+      command: >-
         ls -ld {{ monitoring_storage_root }}
-        {{ monitoring_storage_dirs | map('regex_replace', '^(.*)$', monitoring_storage_root ~ '/\\1') | join(' ') }}
+        {% for dir in monitoring_storage_dirs %}
+        {{ monitoring_storage_root }}/{{ dir }}
+        {% endfor %}
       changed_when: false
       register: monitoring_storage_ls
 

@@ -11,9 +11,9 @@
 #   grafana:       172.17.128.242
 #
 # Note:
-#   This patches the live Services. If ArgoCD desired manifests still declare
-#   NodePort, commit the matching LoadBalancer changes to k8s-manifests as well
-#   so self-heal does not roll them back later.
+#   This also applies infra/metallb-config.yaml from the cp1 k8s-manifests
+#   checkout, so the IPAddressPool/L2Advertisement exist before Services are
+#   switched to LoadBalancer.
 # =========================================================
 
 - name: Enable MetalLB LoadBalancer services
@@ -23,6 +23,8 @@
 
   vars:
     kubeconfig_path: /home/kosa/.kube/config
+    k8s_manifests_dest: /home/kosa/k8s-manifests
+    metallb_config_manifest: "{{ k8s_manifests_dest }}/infra/metallb-config.yaml"
     metallb_namespace: metallb-system
     metallb_ip_pool_name: first-pool
     metallb_l2advertisement_name: example
@@ -61,6 +63,16 @@
       become_user: kosa
       changed_when: false
 
+    - name: Check MetalLB config manifest exists on cp1
+      stat:
+        path: "{{ metallb_config_manifest }}"
+      register: metallb_config_manifest_stat
+
+    - name: Fail if MetalLB config manifest not found on cp1
+      fail:
+        msg: "MetalLB config manifest not found: {{ metallb_config_manifest }}"
+      when: not metallb_config_manifest_stat.stat.exists
+
     - name: Wait for MetalLB controller deployment
       command: >
         kubectl -n {{ metallb_namespace }}
@@ -80,6 +92,31 @@
       environment: "{{ k8s_env }}"
       become_user: kosa
       changed_when: false
+
+    - name: Wait for MetalLB IPAddressPool CRD
+      command: >
+        kubectl wait --for=condition=Established
+        crd/ipaddresspools.metallb.io
+        --timeout={{ metallb_wait_timeout }}
+      environment: "{{ k8s_env }}"
+      become_user: kosa
+      changed_when: false
+
+    - name: Wait for MetalLB L2Advertisement CRD
+      command: >
+        kubectl wait --for=condition=Established
+        crd/l2advertisements.metallb.io
+        --timeout={{ metallb_wait_timeout }}
+      environment: "{{ k8s_env }}"
+      become_user: kosa
+      changed_when: false
+
+    - name: Apply MetalLB address pool config
+      command: kubectl apply -f {{ metallb_config_manifest }}
+      environment: "{{ k8s_env }}"
+      become_user: kosa
+      register: metallb_config_apply
+      changed_when: "'configured' in metallb_config_apply.stdout or 'created' in metallb_config_apply.stdout"
 
     - name: Verify MetalLB IPAddressPool exists
       command: >
@@ -108,7 +145,7 @@
           - "{{ item.name }}"
           - --type=merge
           - -p
-          - "{{ {'metadata': {'annotations': {'metallb.io/loadBalancerIPs': item.ip}}, 'spec': {'type': 'LoadBalancer', 'loadBalancerIP': item.ip}} | to_json }}"
+          - "{{ {'metadata': {'annotations': {'metallb.io/loadBalancerIPs': item.ip}}, 'spec': {'type': 'LoadBalancer', 'loadBalancerIP': none}} | to_json }}"
       environment: "{{ k8s_env }}"
       become_user: kosa
       loop: "{{ loadbalancer_services }}"
