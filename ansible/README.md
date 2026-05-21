@@ -14,7 +14,7 @@ Proxmox VM 위에 kubeadm 기반 Kubernetes 클러스터를 구성하기 위한 
 | 용도 | 네트워크 | 설명 |
 | --- | --- | --- |
 | Ansible SSH | 관리망 `172.17.128.0/22` | 작업 PC 또는 Ansible VM이 접속하는 주소 |
-| Kubernetes API VIP | 관리망 `172.17.128.30` | 외부 `kubectl` 접근용 API endpoint |
+| Kubernetes API VIP | 관리망 `172.17.130.10` | 외부 `kubectl` 접근용 API endpoint |
 | Kubernetes node IP | 10G망 `10.10.10.0/24` | kubelet node IP, control-plane advertise, Calico node IP |
 | Pod CIDR | `10.244.0.0/16` | Kubernetes Pod 대역 |
 
@@ -114,7 +114,7 @@ ansible-playbook playbook.yml
 ansible cp1 -b -m command -a 'kubectl --kubeconfig=/etc/kubernetes/admin.conf get nodes -o wide'
 ansible cp1 -b -m command -a 'kubectl --kubeconfig=/etc/kubernetes/admin.conf -n kube-system get pods -o wide'
 ansible workers -b --become-user kosa -m command -a 'kubectl get nodes'
-ansible kube_vip -b -m shell -a 'hostname; ip -br addr show eth0 | grep 172.17.128.30 || true'
+ansible kube_vip -b -m shell -a 'hostname; ip -br addr show eth0 | grep 172.17.130.10 || true'
 ansible cp1 -b -m command -a 'helm version --short'
 ```
 
@@ -124,7 +124,7 @@ ansible cp1 -b -m command -a 'helm version --short'
 - 노드 `INTERNAL-IP`가 `10.10.10.x`
 - `calico-node`, `kube-vip`, control-plane Pod가 `Running`
 - worker의 `kubectl get nodes`가 조회 전용 kubeconfig로 동작
-- control-plane 중 한 대가 `172.17.128.30` VIP를 보유
+- control-plane 중 한 대가 `172.17.130.10` VIP를 보유
 - cp1에서 `helm version --short`가 정상 출력
 
 ## 운영 메모
