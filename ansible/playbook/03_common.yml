@@ -258,3 +258,28 @@
         - kubelet
         - kubeadm
         - kubectl
+
+# =========================================================
+# kubectl / kubeadm bash 자동완성 설정 (control-plane only)
+# =========================================================
+- name: Configure kubectl bash completion on control-plane nodes
+  hosts: control_plane
+  become: true
+
+  tasks:
+    - name: Install bash-completion
+      apt:
+        name: bash-completion
+        state: present
+
+    - name: Add kubectl completion to kosa .bashrc
+      lineinfile:
+        path: /home/kosa/.bashrc
+        line: "source <(kubectl completion bash)"
+        create: true
+
+    - name: Add kubeadm completion to kosa .bashrc
+      lineinfile:
+        path: /home/kosa/.bashrc
+        line: "source <(kubeadm completion bash)"
+        create: true
