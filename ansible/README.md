@@ -127,6 +127,52 @@ ansible cp1 -b -m command -a 'helm version --short'
 - control-plane 중 한 대가 `172.17.130.10` VIP를 보유
 - cp1에서 `helm version --short`가 정상 출력
 
+## k8s-manifests 배포 (08_deploy_k8s.yml)
+
+클러스터 구성이 완료된 후 cp1에 k8s-manifests를 clone하고 `deploy.sh`를 실행합니다.
+
+### 사전 준비
+
+`deploy.sh`가 필요로 하는 gitignore된 파일을 `ansible/files/`에 복사해 둡니다.
+
+| 넣을 위치 | 설명 |
+| --- | --- |
+| `ansible/secrets.env` | AWS/DB/S3 등 시크릿 변수 |
+| `ansible/alertmanager-config.yaml` | Alertmanager 수신 설정 (Slack/SMTP 등) |
+
+`secrets.env`는 `k8s-manifests/external-secrets/secrets.env.example`을 참고해 작성합니다.
+
+```bash
+cp secrets.env              infra-proxmox/ansible/secrets.env
+cp alertmanager-config.yaml infra-proxmox/ansible/alertmanager-config.yaml
+```
+
+두 파일은 `ansible/.gitignore`에 등록되어 있어 git에 포함되지 않습니다.
+
+### 실행
+
+```bash
+ansible-playbook playbook/08_deploy_k8s.yml
+```
+
+파일 경로를 재정의해야 하는 경우:
+
+```bash
+ansible-playbook playbook/08_deploy_k8s.yml \
+  -e secrets_env_src=/path/to/secrets.env \
+  -e alertmanager_src=/path/to/alertmanager-config.yaml
+```
+
+플레이북이 수행하는 작업:
+
+1. cp1에 `https://github.com/KOSA-cloud-1/k8s-manifests.git` clone (이미 있으면 pull)
+2. `secrets.env` → `/home/kosa/k8s-manifests/external-secrets/secrets.env` 복사
+3. `alertmanager-config.yaml` → `/home/kosa/k8s-manifests/monitoring/alertmanager-config.yaml` 복사
+4. `secrets.env` 내 `ALERTMANAGER_CONFIG_FILE` 경로를 cp1 기준으로 자동 수정
+5. `bash deploy.sh` 실행 (kosa 사용자, kubeconfig `/home/kosa/.kube/config`)
+
+---
+
 ## 운영 메모
 
 - `node_ip`를 바꾸면 기존 클러스터와 인증서가 꼬일 수 있으므로 초기화 후 다시 구성합니다.

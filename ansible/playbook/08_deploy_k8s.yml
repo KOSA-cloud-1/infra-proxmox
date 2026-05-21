@@ -1,0 +1,113 @@
+---
+# =========================================================
+# k8s-manifests clone + deploy
+#
+# 실행 전 준비:
+#   cp secrets.env              ansible/secrets.env
+#   cp alertmanager-config.yaml ansible/alertmanager-config.yaml
+#
+# 실행:
+#   ansible-playbook playbook/08_deploy_k8s.yml
+#
+# 경로 재정의:
+#   ansible-playbook playbook/08_deploy_k8s.yml \
+#     -e secrets_env_src=/path/to/secrets.env \
+#     -e alertmanager_src=/path/to/alertmanager-config.yaml
+# =========================================================
+
+- name: Clone and deploy k8s-manifests on cp1
+  hosts: cp1
+  become: true
+
+  vars:
+    k8s_manifests_repo: "https://github.com/KOSA-cloud-1/k8s-manifests.git"
+    k8s_manifests_dest: "/home/kosa/k8s-manifests"
+    secrets_env_src: "{{ playbook_dir }}/../secrets.env"
+    alertmanager_src: "{{ playbook_dir }}/../alertmanager-config.yaml"
+
+  tasks:
+
+    # =========================================================
+    # 사전 검증
+    # =========================================================
+    - name: Check secrets.env exists on controller
+      stat:
+        path: "{{ secrets_env_src }}"
+      delegate_to: localhost
+      become: false
+      register: secrets_env_stat
+
+    - name: Fail if secrets.env not found on controller
+      fail:
+        msg: "secrets.env not found: {{ secrets_env_src }}\nPass -e secrets_env_src=<path> to override."
+      when: not secrets_env_stat.stat.exists
+
+    - name: Check alertmanager-config.yaml exists on controller
+      stat:
+        path: "{{ alertmanager_src }}"
+      delegate_to: localhost
+      become: false
+      register: alertmanager_stat
+
+    - name: Warn if alertmanager-config.yaml not found
+      debug:
+        msg: "alertmanager-config.yaml not found: {{ alertmanager_src }} — skipping copy. ALERTMANAGER_CONFIG_FILE must already be set in secrets.env."
+      when: not alertmanager_stat.stat.exists
+
+    # =========================================================
+    # git clone / pull
+    # =========================================================
+    - name: Clone k8s-manifests repository
+      git:
+        repo: "{{ k8s_manifests_repo }}"
+        dest: "{{ k8s_manifests_dest }}"
+        version: main
+        force: false
+        update: true
+      become_user: kosa
+
+    # =========================================================
+    # gitignore된 시크릿 파일 배포
+    # =========================================================
+    - name: Copy secrets.env to cp1
+      copy:
+        src: "{{ secrets_env_src }}"
+        dest: "{{ k8s_manifests_dest }}/external-secrets/secrets.env"
+        owner: kosa
+        group: kosa
+        mode: '0600'
+
+    - name: Copy alertmanager-config.yaml to cp1
+      copy:
+        src: "{{ alertmanager_src }}"
+        dest: "{{ k8s_manifests_dest }}/monitoring/alertmanager-config.yaml"
+        owner: kosa
+        group: kosa
+        mode: '0600'
+      when: alertmanager_stat.stat.exists
+
+    - name: Set ALERTMANAGER_CONFIG_FILE to cp1 path in secrets.env
+      lineinfile:
+        path: "{{ k8s_manifests_dest }}/external-secrets/secrets.env"
+        regexp: '^ALERTMANAGER_CONFIG_FILE='
+        line: "ALERTMANAGER_CONFIG_FILE={{ k8s_manifests_dest }}/monitoring/alertmanager-config.yaml"
+      when: alertmanager_stat.stat.exists
+
+    # =========================================================
+    # deploy.sh 실행
+    # =========================================================
+    - name: Run deploy.sh
+      shell: bash deploy.sh
+      args:
+        chdir: "{{ k8s_manifests_dest }}"
+        executable: /bin/bash
+      environment:
+        HOME: /home/kosa
+        KUBECONFIG: /home/kosa/.kube/config
+        PATH: /usr/local/bin:/usr/bin:/bin:/snap/bin
+      become_user: kosa
+      register: deploy_result
+
+    - name: Show deploy.sh output
+      debug:
+        msg: "{{ deploy_result.stdout_lines }}"
