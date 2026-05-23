@@ -1,0 +1,68 @@
+# =========================================================
+# 11. Watchdog self-reboot on hung control-plane nodes
+# - 노드가 "먹통(hang)" 상태가 되면 스스로 리셋시켜
+#   kube-vip ARP 페일오버가 동작하는 "완전 종료" 상황으로 전환한다.
+# - softdog + systemd RuntimeWatchdog : userspace/소프트 행, OOM, D-state 폭주 대응
+# - kernel.panic / panic_on_oops      : 커널 패닉/oops 시 자동 리부팅
+# - 커널까지 완전히 잠기는 하드 락업은 Proxmox i6300esb watchdog(terraform)에서 별도 대응
+# =========================================================
+- name: Enable watchdog self-reboot on hung control-plane nodes
+  hosts: control_plane
+  become: true
+  vars:
+    # 이 시간만큼 무응답이면 강제 리셋 (systemd는 절반 주기로 watchdog을 pet 함)
+    runtime_watchdog_sec: 30
+
+  tasks:
+    - name: Load softdog kernel module at boot
+      copy:
+        dest: /etc/modules-load.d/softdog.conf
+        content: "softdog\n"
+        mode: '0644'
+
+    - name: Load softdog now
+      command: modprobe softdog
+      args:
+        creates: /dev/watchdog
+
+    - name: Ensure systemd manager drop-in directory exists
+      file:
+        path: /etc/systemd/system.conf.d
+        state: directory
+        mode: '0755'
+
+    - name: Configure systemd runtime watchdog
+      copy:
+        dest: /etc/systemd/system.conf.d/watchdog.conf
+        content: |
+          [Manager]
+          RuntimeWatchdogSec={{ runtime_watchdog_sec }}s
+          RebootWatchdogSec=2min
+        mode: '0644'
+      register: systemd_watchdog_conf
+
+    # RuntimeWatchdogSec 은 daemon-reload 가 아니라 re-exec 해야 적용됨
+    - name: Apply systemd watchdog config (daemon re-exec)
+      command: systemctl daemon-reexec
+      changed_when: false
+
+    # 커널 패닉/oops 도 자동 리부팅으로 전환 (워치독과 상호 보완)
+    - name: Reboot fast on kernel panic / oops
+      sysctl:
+        name: "{{ item.name }}"
+        value: "{{ item.value }}"
+        sysctl_set: true
+        state: present
+        reload: true
+      loop:
+        - { name: kernel.panic,         value: "10" }
+        - { name: kernel.panic_on_oops, value: "1" }
+
+    - name: Read watchdog status
+      command: wdctl
+      register: wdctl_out
+      changed_when: false
+
+    - name: Show watchdog status
+      debug:
+        msg: "{{ wdctl_out.stdout_lines }}"
