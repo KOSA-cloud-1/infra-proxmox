@@ -26,7 +26,9 @@ resource "proxmox_virtual_environment_vm" "worker" {
 
   memory {
     dedicated = each.value.memory
-    floating  = each.value.balloon
+    # ballooning 비활성(고정 메모리): k8s 스케줄러가 실제 RAM을 정확히 보게 한다.
+    # ballooning이 켜져 있으면 호스트 압박 시 게스트 RAM이 floor까지 줄어 OOM 위험.
+    floating = 0
   }
 
   operating_system {
