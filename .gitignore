@@ -1,0 +1,31 @@
+# 루트 .gitignore — 하위 디렉터리별 .gitignore(terraform/, terraform/k8s-vm/, ansible/)를
+# 보완하여 모든 하위 경로에 일괄 적용한다. (예: terraform/haproxy/.terraform/ 갭 보강)
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+*.tfvars.json
+crash.log
+crash.*.log
+# .terraform.lock.hcl 은 provider 재현성을 위해 커밋(개별 디렉터리 정책 유지)
+
+# Ansible
+*.retry
+inventory.ini
+!inventory.ini.example
+ansible-2.10/
+
+# kubeconfig / 인증서 / 시크릿 (평문)
+kubeconfig
+**/admin.conf
+secrets.env
+!secrets.env.example
+alertmanager-config.yaml
+
+# OS / editor
+.DS_Store
+*.swp
+*~
