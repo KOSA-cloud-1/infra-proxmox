@@ -82,7 +82,7 @@ cd terraform/haproxy
 ./terraform-execute.sh
 ```
 
-`terraform/haproxy`는 VLAN20 DMZ에 HAProxy VM 2대를 생성하고, **keepalived VRRP로 단일 DMZ VIP를 active/backup 이중화**합니다(우선순위 `haproxy-1`=110 MASTER / `haproxy-2`=100 BACKUP, MASTER만 VIP 보유). HAProxy는 VIP의 `80` 트래픽을 Kubernetes Ingress VIP의 `80`으로 TCP 전달합니다.
+`terraform/haproxy`는 VLAN20 DMZ에 HAProxy VM 2대를 생성하고, **keepalived VRRP로 단일 DMZ VIP를 active/backup 이중화**합니다(우선순위 `haproxy-1`=110 PRIMARY / `haproxy-2`=100 BACKUP, PRIMARY만 VIP 보유). HAProxy는 VIP의 `80` 트래픽을 Kubernetes Ingress VIP의 `80`으로 TCP 전달합니다.
 
 > TLS(443)는 상위 **AWS NLB에서 종료**되므로 온프렘 HAProxy는 평문 HTTP `80`만 처리합니다(443 frontend 없음). 전체 외부 흐름은 `infra-aws` README의 트래픽 흐름 다이어그램을 참고하세요.
 
